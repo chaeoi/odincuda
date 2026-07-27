@@ -7,12 +7,22 @@ WORKSPACE_ROOT="$(dirname "$(dirname "$PKG_DIR")")"
 # Workspace source directory (contains all packages)
 WORKSPACE_SRC="${WORKSPACE_ROOT}/src"
 PROJECT_NAME="odin_ros_driver"
+PACKAGE_BACKUP=""
 
 # Define color codes
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' 
+
+restore_package_xml() {
+    if [[ -n "$PACKAGE_BACKUP" && -f "$PACKAGE_BACKUP" ]]; then
+        cp "$PACKAGE_BACKUP" "${PKG_DIR}/package.xml"
+        rm -f "$PACKAGE_BACKUP"
+    fi
+}
+
+trap restore_package_xml EXIT INT TERM
 
 # Clean workspace function
 clean_workspace() {
@@ -62,7 +72,12 @@ build_workspace() {
         return 1
     fi
     
-    if [ -f "${PKG_DIR}/package.xml" ]; then
+    if [ -f "${PKG_DIR}/package_ros1.xml" ] && [ -f "${PKG_DIR}/package.xml" ]; then
+        echo "Creating temporary package.xml (using package_ros1.xml)"
+        PACKAGE_BACKUP="$(mktemp)" || return 1
+        cp "${PKG_DIR}/package.xml" "$PACKAGE_BACKUP" || return 1
+        cp "${PKG_DIR}/package_ros1.xml" "${PKG_DIR}/package.xml" || return 1
+    elif [ -f "${PKG_DIR}/package.xml" ]; then
         echo "Using existing package.xml"
     else
         echo -e "${RED}Could not find package.xml in package directory${NC}"

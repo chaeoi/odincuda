@@ -5,14 +5,15 @@
 - Ubuntu 20.04 + ROS1 Noetic + CUDA 11.4
 - Ubuntu 22.04 + ROS2 Humble + CUDA 12.6
 
-项目基于 Manifold Tech `odin_ros_driver` 的提交
-`cc69880db4cc26ec2682b0d0e038cf457f813f4c`，许可证为 Apache-2.0。
+本项目基于官方仓库
+[manifoldsdk/odin_ros_driver](https://github.com/manifoldsdk/odin_ros_driver) 的提交
+`cc69880db4cc26ec2682b0d0e038cf457f813f4c` 修改，许可证为 Apache-2.0。
 
 ## 与官方驱动的关系
 
 本仓库直接沿用官方驱动的目录结构、文件名、类名、变量名、节点名和话题名，CUDA
 功能在原有实现中按编译选项接入。这样后续可继续对照
-`https://github.com/manifoldsdk/odin_ros_driver.git` 的变更，不需要维护一套重新命名的代码。
+[官方仓库](https://github.com/manifoldsdk/odin_ros_driver) 的变更，不需要维护一套重新命名的代码。
 
 ## 加速范围
 
@@ -68,8 +69,9 @@ cd odin_ros_driver
 ./script/build_ros2.sh
 ```
 
-ROS2 构建脚本会临时使用 `package_ros2.xml` 完成 colcon 构建，结束后恢复 ROS1
-清单文件。
+仓库按官方布局保留 `package.xml`、`package_ros1.xml` 和 `package_ros2.xml`。
+`package.xml` 与 `package_ros1.xml` 是 ROS1 清单；ROS1/ROS2 构建脚本会临时使用对应
+模板，结束后恢复原 `package.xml`，不会在源码目录留下切换痕迹。
 
 ## CUDA 自检
 
