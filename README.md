@@ -50,8 +50,8 @@ CSV 均默认关闭。导航所需的 TF 独立保留，不会同时发布未使
 ## ROS1 编译
 
 ```bash
-mkdir -p ~/odin_gpu_ws/src
-cd ~/odin_gpu_ws/src
+mkdir -p ~/odincuda/src
+cd ~/odincuda/src
 git clone https://github.com/chaeoi/odincuda.git odin_ros_driver
 cd ..
 source /opt/ros/noetic/setup.bash
@@ -61,8 +61,8 @@ catkin_make -DODIN_BUILD_CUDA=ON -DODIN_CUDA_ARCH=87
 ## ROS2 编译
 
 ```bash
-mkdir -p ~/odin_gpu_ws/src
-cd ~/odin_gpu_ws/src
+mkdir -p ~/odincuda/src
+cd ~/odincuda/src
 git clone https://github.com/chaeoi/odincuda.git odin_ros_driver
 cd odin_ros_driver
 ./script/build_ros2.sh
@@ -76,14 +76,14 @@ ROS2 构建脚本会临时使用 `package_ros2.xml` 完成 colcon 构建，结�
 ROS1：
 
 ```bash
-cd ~/odin_gpu_ws
+cd ~/odincuda
 ./devel/lib/odin_ros_driver/odin_cuda_smoke_test
 ```
 
 ROS2：
 
 ```bash
-cd ~/odin_gpu_ws
+cd ~/odincuda
 source /opt/ros/humble/setup.bash
 source install/setup.bash
 ros2 run odin_ros_driver odin_cuda_smoke_test
@@ -99,7 +99,7 @@ ros2 run odin_ros_driver odin_cuda_smoke_test
 ROS1：
 
 ```bash
-cd ~/odin_gpu_ws
+cd ~/odincuda
 source devel/setup.bash
 roslaunch odin_ros_driver odin1_ros1_gpu.launch
 ```
@@ -107,7 +107,7 @@ roslaunch odin_ros_driver odin1_ros1_gpu.launch
 ROS2：
 
 ```bash
-cd ~/odin_gpu_ws
+cd ~/odincuda
 source /opt/ros/humble/setup.bash
 source install/setup.bash
 ros2 launch odin_ros_driver odin1_ros2_gpu.launch.py

@@ -95,8 +95,8 @@ rosdep install --from-paths src --ignore-src -r -y
 以下目录名不要随意修改，构建脚本会从目录结构中找到工作空间：
 
 ```bash
-mkdir -p ~/odin_gpu_ws/src
-cd ~/odin_gpu_ws/src
+mkdir -p ~/odincuda/src
+cd ~/odincuda/src
 git clone https://github.com/chaeoi/odincuda.git odin_ros_driver
 ```
 
@@ -105,13 +105,13 @@ git clone https://github.com/chaeoi/odincuda.git odin_ros_driver
 标定文件与具体相机绑定，不在公开仓库中。将当前相机的 `calib.yaml` 放到：
 
 ```text
-~/odin_gpu_ws/src/odin_ros_driver/config/calib.yaml
+~/odincuda/src/odin_ros_driver/config/calib.yaml
 ```
 
 确认文件存在：
 
 ```bash
-test -f ~/odin_gpu_ws/src/odin_ros_driver/config/calib.yaml && echo "标定文件已就绪"
+test -f ~/odincuda/src/odin_ros_driver/config/calib.yaml && echo "标定文件已就绪"
 ```
 
 ## 五、确认默认配置
@@ -119,7 +119,7 @@ test -f ~/odin_gpu_ws/src/odin_ros_driver/config/calib.yaml && echo "标定文�
 仓库默认只发布当前使用所需的去畸变图、原始 DTOF 点云和深度图。先确认关键开关：
 
 ```bash
-cd ~/odin_gpu_ws/src/odin_ros_driver
+cd ~/odincuda/src/odin_ros_driver
 grep -E 'sendrgb:|sendrgbundistort:|sendimu:|sendodom:|send_odom_baselink_tf:|senddtof:|senddepth:|senddepthcloud:' \
   config/control_command.yaml
 ```
@@ -144,7 +144,7 @@ senddepthcloud: 0
 ## 六、编译 ROS2 GPU 版本
 
 ```bash
-cd ~/odin_gpu_ws/src/odin_ros_driver
+cd ~/odincuda/src/odin_ros_driver
 export PATH=/usr/local/cuda/bin:$PATH
 ./script/build_ros2.sh
 ```
@@ -156,7 +156,7 @@ export PATH=/usr/local/cuda/bin:$PATH
 自检不需要连接相机：
 
 ```bash
-cd ~/odin_gpu_ws
+cd ~/odincuda
 source /opt/ros/humble/setup.bash
 source install/setup.bash
 ros2 run odin_ros_driver odin_cuda_smoke_test
@@ -175,7 +175,7 @@ CUDA smoke test passed
 确保没有另一份 CPU 或 GPU 驱动正在占用同一台相机，然后执行：
 
 ```bash
-cd ~/odin_gpu_ws
+cd ~/odincuda
 source /opt/ros/humble/setup.bash
 source install/setup.bash
 ros2 launch odin_ros_driver odin1_ros2_gpu.launch.py
@@ -188,7 +188,7 @@ ros2 launch odin_ros_driver odin1_ros2_gpu.launch.py
 保持相机启动终端不动，另开一个终端：
 
 ```bash
-cd ~/odin_gpu_ws
+cd ~/odincuda
 source /opt/ros/humble/setup.bash
 source install/setup.bash
 ros2 node list
@@ -227,8 +227,8 @@ ROS1 Noetic 环境使用同一份源码：
 ```bash
 sudo apt-get update
 sudo apt-get install -y python3-rosdep libopencv-dev libpcl-dev libusb-1.0-0-dev
-mkdir -p ~/odin_gpu_ws/src
-cd ~/odin_gpu_ws/src
+mkdir -p ~/odincuda/src
+cd ~/odincuda/src
 git clone https://github.com/chaeoi/odincuda.git odin_ros_driver
 cd ..
 source /opt/ros/noetic/setup.bash
@@ -266,7 +266,7 @@ ps -ef | grep -E 'host_sdk_sample|pcd2depth' | grep -v grep
 ### 需要重新完整编译
 
 ```bash
-cd ~/odin_gpu_ws/src/odin_ros_driver
+cd ~/odincuda/src/odin_ros_driver
 ./script/build_ros2.sh --clean
 ./script/build_ros2.sh
 ```
