@@ -122,7 +122,7 @@ int main()
             reinterpret_cast<const float *>(points.data()), points.size(), 4,
             image.data(), width, height, width * 3,
             map_x.data(), map_y.data(), width,
-            depth_params, depth, depth_cloud, error))
+            depth_params, true, depth, depth_cloud, error))
     {
         std::cerr << "depth pipeline failed: " << error << std::endl;
         return 5;
@@ -135,9 +135,27 @@ int main()
         return 6;
     }
 
+    std::vector<float> depth_only;
+    std::vector<float> unused_depth_cloud{1.0f};
+    error.clear();
+    if (!odin_cuda::processDepth(
+            reinterpret_cast<const float *>(points.data()), points.size(), 4,
+            nullptr, 0, 0, 0, nullptr, nullptr, 0,
+            depth_params, false, depth_only, unused_depth_cloud, error))
+    {
+        std::cerr << "depth-only pipeline failed: " << error << std::endl;
+        return 7;
+    }
+    if (depth_only.size() != depth.size() || !unused_depth_cloud.empty())
+    {
+        std::cerr << "depth-only pipeline returned unexpected output" << std::endl;
+        return 8;
+    }
+
     std::cout << "CUDA smoke test passed: remap=" << remapped.size()
               << " bytes, rendered_points=" << rendered_cloud.size() / 4
               << ", positive_depth_pixels=" << positive_depth
-              << ", depth_cloud_points=" << depth_cloud.size() / 4 << std::endl;
+              << ", depth_cloud_points=" << depth_cloud.size() / 4
+              << ", depth_only_pixels=" << depth_only.size() << std::endl;
     return 0;
 }

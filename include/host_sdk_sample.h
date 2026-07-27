@@ -72,6 +72,9 @@ enum class OdometryType {
 
 
 extern int g_log_level;
+extern int g_sendrgb;
+extern int g_sendrgb_compressed;
+extern int g_sendrgb_undistort;
 extern int g_sendcloudrender;
 extern int g_use_host_ros_time;
 double get_ptp_smoothed_delay();
@@ -816,122 +819,123 @@ void publishRgb(capture_Image_List_t *stream) {
         #else
             ROS_INFO("old format rgb data, please upgrade device firmware");
         #endif
-    } else {// new version jpeg data
-
-        std::vector<uint8_t> jpeg_data(static_cast<uint8_t*>(image.pAddr),
-                                        static_cast<uint8_t*>(image.pAddr) + image.length);
-
-        // convert back to bgr8                                                
-        cv::Mat decoded_image = cv::imdecode(jpeg_data, cv::IMREAD_COLOR);
-
-        cv_bridge::CvImage cv_image;
-        #ifdef ROS2
-            cv_image.header.stamp = make_aligned_stamp(stream->imageList[0].timestamp, node_);
-        #else
-            cv_image.header.stamp = make_aligned_stamp(stream->imageList[0].timestamp);
-        #endif
-        cv_image.encoding = "bgr8";
-        cv_image.image = decoded_image;
-
-        if (g_sendcloudrender) {
-            std::lock_guard<std::mutex> lock(rgb_queue_mutex_);
-            if (rgb_image_queue_.size() >= 10) {
-                rgb_image_queue_.pop_front();
-            }
-            rgb_image_queue_.push_back(cv_image.toImageMsg());
-            }        
-
-        // Enqueue binary logging for image
-        if (data_logger_) {
-            const uint32_t idx_now = image_index_.fetch_add(1, std::memory_order_relaxed);
-            const double ts_sec = static_cast<double>(stream->imageList[0].timestamp) / 1e9;
-            const uint32_t jpeg_size = static_cast<uint32_t>(jpeg_data.size());
-            std::vector<uint8_t> blob;
-            blob.reserve(sizeof(uint32_t) + sizeof(double) + sizeof(uint32_t) + jpeg_size);
-            auto append_pod = [&](const auto& v) {
-                const uint8_t* p = reinterpret_cast<const uint8_t*>(&v);
-                blob.insert(blob.end(), p, p + sizeof(v));
-            };
-            append_pod(idx_now);
-            append_pod(ts_sec);
-            append_pod(jpeg_size);
-            blob.insert(blob.end(), jpeg_data.begin(), jpeg_data.end());
-            data_logger_->enqueueImageFrame(std::move(blob));
-        }
-
-        // undistort image
-        cv::Mat undistorted_image = cv::Mat::zeros(decoded_image.size(), decoded_image.type());
-        cv_bridge::CvImage cv_undistorted_image;
-
-        if (m_undistort_map_init_success) {
-#ifdef ODIN_ENABLE_CUDA
-            std::string gpu_remap_error;
-            const bool gpu_remap_ok = odin_cuda::remapBgr(
-                decoded_image.ptr<uint8_t>(), decoded_image.cols, decoded_image.rows,
-                decoded_image.step, m_undistort_map_x.ptr<float>(),
-                m_undistort_map_y.ptr<float>(), m_undistort_map_x.step / sizeof(float),
-                undistorted_image.ptr<uint8_t>(), undistorted_image.step, gpu_remap_error);
-            if (!gpu_remap_ok) {
-                static bool cuda_remap_warning_printed = false;
-                if (!cuda_remap_warning_printed) {
-#ifdef ROS2
-                    RCLCPP_WARN(rclcpp::get_logger("publishRgb"),
-                                "CUDA image remap unavailable, using CPU fallback: %s",
-                                gpu_remap_error.c_str());
-#else
-                    ROS_WARN("CUDA image remap unavailable, using CPU fallback: %s", gpu_remap_error.c_str());
-#endif
-                    cuda_remap_warning_printed = true;
-                }
-                cv::remap(decoded_image, undistorted_image, m_undistort_map_x,
-                          m_undistort_map_y, cv::INTER_LINEAR);
-            }
-#else
-            cv::remap(decoded_image, undistorted_image, m_undistort_map_x,
-                      m_undistort_map_y, cv::INTER_LINEAR);
-#endif
-            #ifdef ROS2
-                cv_undistorted_image.header.stamp = make_aligned_stamp(stream->imageList[0].timestamp, node_);
-            #else
-                cv_undistorted_image.header.stamp = make_aligned_stamp(stream->imageList[0].timestamp);
-            #endif
-            cv_undistorted_image.encoding = "bgr8";
-            cv_undistorted_image.image = undistorted_image;
-        }
-
-        #ifdef ROS2
-        {
-            rgb_pub_->publish(*cv_image.toImageMsg());
-            if (m_undistort_map_init_success) {
-                undistort_rgb_pub_->publish(*cv_undistorted_image.toImageMsg());
-            }
-
-            // original jpeg - always publish as it's small
-            sensor_msgs::msg::CompressedImage jpeg_msg;
-            jpeg_msg.header.stamp = make_aligned_stamp(stream->imageList[0].timestamp, node_);
-            jpeg_msg.format = "jpeg";
-            jpeg_msg.data = jpeg_data;
-
-            compressed_rgb_pub_->publish(jpeg_msg);
-        }
-        #else
-        {
-            rgb_pub_.publish(cv_image.toImageMsg());
-            if (m_undistort_map_init_success) {
-                undistort_rgb_pub_.publish(cv_undistorted_image.toImageMsg());
-            }
-
-            // original jpeg
-            sensor_msgs::CompressedImagePtr jpeg_msg(new sensor_msgs::CompressedImage());
-            jpeg_msg->header.stamp = make_aligned_stamp(stream->imageList[0].timestamp);
-            jpeg_msg->format = "jpeg";
-            jpeg_msg->data = jpeg_data;
-
-            compressed_rgb_pub_.publish(jpeg_msg);
-        }
-        #endif
+        return;
     }
 
+    std::vector<uint8_t> jpeg_data(static_cast<uint8_t*>(image.pAddr),
+                                   static_cast<uint8_t*>(image.pAddr) + image.length);
+
+    if (data_logger_) {
+        const uint32_t idx_now = image_index_.fetch_add(1, std::memory_order_relaxed);
+        const double ts_sec = static_cast<double>(image.timestamp) / 1e9;
+        const uint32_t jpeg_size = static_cast<uint32_t>(jpeg_data.size());
+        std::vector<uint8_t> blob;
+        blob.reserve(sizeof(uint32_t) + sizeof(double) + sizeof(uint32_t) + jpeg_size);
+        auto append_pod = [&](const auto& value) {
+            const uint8_t* data = reinterpret_cast<const uint8_t*>(&value);
+            blob.insert(blob.end(), data, data + sizeof(value));
+        };
+        append_pod(idx_now);
+        append_pod(ts_sec);
+        append_pod(jpeg_size);
+        blob.insert(blob.end(), jpeg_data.begin(), jpeg_data.end());
+        data_logger_->enqueueImageFrame(std::move(blob));
+    }
+
+    if (g_sendrgb_compressed) {
+#ifdef ROS2
+        sensor_msgs::msg::CompressedImage jpeg_msg;
+        jpeg_msg.header.stamp = make_aligned_stamp(image.timestamp, node_);
+        jpeg_msg.format = "jpeg";
+        jpeg_msg.data = jpeg_data;
+        compressed_rgb_pub_->publish(jpeg_msg);
+#else
+        sensor_msgs::CompressedImagePtr jpeg_msg(new sensor_msgs::CompressedImage());
+        jpeg_msg->header.stamp = make_aligned_stamp(image.timestamp);
+        jpeg_msg->format = "jpeg";
+        jpeg_msg->data = jpeg_data;
+        compressed_rgb_pub_.publish(jpeg_msg);
+#endif
+    }
+
+    if (!g_sendrgb && !g_sendrgb_undistort && !g_sendcloudrender) {
+        return;
+    }
+
+    cv::Mat decoded_image = cv::imdecode(jpeg_data, cv::IMREAD_COLOR);
+    if (decoded_image.empty()) {
+#ifdef ROS2
+        RCLCPP_WARN(rclcpp::get_logger("publishRgb"), "Failed to decode RGB JPEG frame");
+#else
+        ROS_WARN("Failed to decode RGB JPEG frame");
+#endif
+        return;
+    }
+
+    cv_bridge::CvImage cv_image;
+#ifdef ROS2
+    cv_image.header.stamp = make_aligned_stamp(image.timestamp, node_);
+#else
+    cv_image.header.stamp = make_aligned_stamp(image.timestamp);
+#endif
+    cv_image.encoding = "bgr8";
+    cv_image.image = decoded_image;
+
+    if (g_sendcloudrender) {
+        std::lock_guard<std::mutex> lock(rgb_queue_mutex_);
+        if (rgb_image_queue_.size() >= 10) {
+            rgb_image_queue_.pop_front();
+        }
+        rgb_image_queue_.push_back(cv_image.toImageMsg());
+    }
+
+    if (g_sendrgb) {
+#ifdef ROS2
+        rgb_pub_->publish(*cv_image.toImageMsg());
+#else
+        rgb_pub_.publish(cv_image.toImageMsg());
+#endif
+    }
+
+    if (g_sendrgb_undistort && m_undistort_map_init_success) {
+        cv::Mat undistorted_image(decoded_image.size(), decoded_image.type());
+#ifdef ODIN_ENABLE_CUDA
+        std::string gpu_remap_error;
+        const bool gpu_remap_ok = odin_cuda::remapBgr(
+            decoded_image.ptr<uint8_t>(), decoded_image.cols, decoded_image.rows,
+            decoded_image.step, m_undistort_map_x.ptr<float>(),
+            m_undistort_map_y.ptr<float>(), m_undistort_map_x.step / sizeof(float),
+            undistorted_image.ptr<uint8_t>(), undistorted_image.step, gpu_remap_error);
+        if (!gpu_remap_ok) {
+            static bool cuda_remap_warning_printed = false;
+            if (!cuda_remap_warning_printed) {
+#ifdef ROS2
+                RCLCPP_WARN(rclcpp::get_logger("publishRgb"),
+                            "CUDA image remap unavailable, using CPU fallback: %s",
+                            gpu_remap_error.c_str());
+#else
+                ROS_WARN("CUDA image remap unavailable, using CPU fallback: %s", gpu_remap_error.c_str());
+#endif
+                cuda_remap_warning_printed = true;
+            }
+            cv::remap(decoded_image, undistorted_image, m_undistort_map_x,
+                      m_undistort_map_y, cv::INTER_LINEAR);
+        }
+#else
+        cv::remap(decoded_image, undistorted_image, m_undistort_map_x,
+                  m_undistort_map_y, cv::INTER_LINEAR);
+#endif
+
+        cv_bridge::CvImage cv_undistorted_image;
+        cv_undistorted_image.header = cv_image.header;
+        cv_undistorted_image.encoding = "bgr8";
+        cv_undistorted_image.image = undistorted_image;
+#ifdef ROS2
+        undistort_rgb_pub_->publish(*cv_undistorted_image.toImageMsg());
+#else
+        undistort_rgb_pub_.publish(cv_undistorted_image.toImageMsg());
+#endif
+    }
 }
 
 

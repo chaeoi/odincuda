@@ -8,6 +8,12 @@
 项目基于 Manifold Tech `odin_ros_driver` 的提交
 `cc69880db4cc26ec2682b0d0e038cf457f813f4c`，许可证为 Apache-2.0。
 
+## 与官方驱动的关系
+
+本仓库直接沿用官方驱动的目录结构、文件名、类名、变量名、节点名和话题名，CUDA
+功能在原有实现中按编译选项接入。这样后续可继续对照
+`https://github.com/manifoldsdk/odin_ros_driver.git` 的变更，不需要维护一套重新命名的代码。
+
 ## 加速范围
 
 - `host_sdk_sample_gpu`：彩色点云渲染、BGR 图像去畸变
@@ -17,6 +23,18 @@
 
 传感器 SDK、JPEG 解码、ROS 消息序列化和发布仍在 CPU 上执行。单个 CUDA
 操作失败时会输出一次警告，并自动回退到原 CPU 实现。
+
+## 默认低占用配置
+
+默认配置面向去畸变图和深度图使用场景，只保留：
+
+- `/odin1/image/undistorted`
+- `/odin1/cloud_raw`，供深度节点输入
+- `/odin1/depth_img_competetion`
+
+原始 RGB、压缩 RGB、IMU、里程计、SLAM 点云、渲染点云、彩色深度点云、状态
+CSV 均默认关闭。需要这些数据时，在 `config/control_command.yaml` 中把对应开关改为
+`1` 即可。开启 `senddepthcloud` 时还需同时开启 `sendrgb`。
 
 ## 目标环境
 
@@ -69,7 +87,8 @@ source install/setup.bash
 ros2 run odin_ros_driver odin_cuda_smoke_test
 ```
 
-自检覆盖图像映射、彩色点云渲染、深度投影和深度点云生成。
+自检覆盖图像映射、彩色点云渲染、深度投影、彩色深度点云，以及不传颜色图的
+深度图专用路径。
 
 ## 启动相机
 
@@ -104,6 +123,17 @@ roslaunch odin_ros_driver odin1_ros1_gpu.launch \
 ros2 launch odin_ros_driver odin1_ros2_gpu.launch.py \
   enable_reprojection:=true enable_overlay:=true
 ```
+
+## 实机结果
+
+ROS2 + CUDA 默认配置已完成全量编译、CUDA 自检和接入相机测试。驱动内部统计的
+RGB、DTOF 接收频率稳定在约 `10.2 Hz`，去畸变图和深度图均能收到有效消息。
+
+同一环境下，优化前记录为主驱动约 `81.3% CPU`、深度节点约 `25.5% CPU`；当前
+20 秒采样为主驱动约 `72.5% CPU`、深度节点约 `3.9%`，深度节点重复采样范围为
+`3.9%` 至 `5.3%`。两进程合计 CPU 约降低 `27%` 至 `28%`。GPU 12 秒采样平均
+约 `8.9%`、峰值 `22%`，表现为每帧短时间工作。数值会随功耗模式、订阅者和系统
+负载变化。
 
 ## 已验证环境
 

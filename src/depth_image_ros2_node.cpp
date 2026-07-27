@@ -26,28 +26,40 @@ DepthImageRos2Node::DepthImageRos2Node(const rclcpp::NodeOptions & options)
     color_raw_topic_ = this->declare_parameter<std::string>("color_raw_topic", "/odin1/image");
     depth_image_topic_ = this->declare_parameter<std::string>("depth_image_topic", "/odin1/depth_img_competetion");
     depth_cloud_topic_ = this->declare_parameter<std::string>("depth_cloud_topic", "/odin1/depth_img_competetion_cloud");
+    publish_depth_cloud_ = this->declare_parameter<bool>("publish_depth_cloud", false);
 
     RCLCPP_INFO_STREAM(this->get_logger(), 
                        "\n  cloud_raw_topic: " << cloud_raw_topic_
                        << "\n  color_compressed_topic: " << color_compressed_topic_
                        << "\n  color_raw_topic: " << color_raw_topic_
                        << "\n  depth_image_topic: " << depth_image_topic_
-                       << "\n  depth_cloud_topic: " << depth_cloud_topic_);
+                       << "\n  depth_cloud_topic: " << depth_cloud_topic_
+                       << "\n  publish_depth_cloud: " << (publish_depth_cloud_ ? "true" : "false"));
 }
 
 void DepthImageRos2Node::initialize()
 {
-    cloud_sub_.subscribe(this, cloud_raw_topic_);
-    color_compressed_sub_.subscribe(this, color_compressed_topic_);
-    color_sub_.subscribe(this, color_raw_topic_);
-
-    sync_ = std::make_shared<Sync>(MySyncPolicy(10), cloud_sub_, color_sub_);
-    sync_->registerCallback(std::bind(&DepthImageRos2Node::syncCallback, this, 
-                                     std::placeholders::_1, std::placeholders::_2));
+    if (publish_depth_cloud_)
+    {
+        cloud_sub_.subscribe(this, cloud_raw_topic_);
+        color_sub_.subscribe(this, color_raw_topic_);
+        sync_ = std::make_shared<Sync>(MySyncPolicy(10), cloud_sub_, color_sub_);
+        sync_->registerCallback(std::bind(&DepthImageRos2Node::syncCallback, this,
+                                         std::placeholders::_1, std::placeholders::_2));
+    }
+    else
+    {
+        cloud_only_sub_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
+            cloud_raw_topic_, rclcpp::SensorDataQoS(),
+            std::bind(&DepthImageRos2Node::cloudCallback, this, std::placeholders::_1));
+    }
 
     it_ = std::make_shared<image_transport::ImageTransport>(shared_from_this());
     depth_image_pub_ = it_->advertise(depth_image_topic_, 1);
-    depth_cloud_pub_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(depth_cloud_topic_, 1);
+    if (publish_depth_cloud_)
+    {
+        depth_cloud_pub_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(depth_cloud_topic_, 1);
+    }
 
     RCLCPP_INFO(this->get_logger(), "DepthImageRos2Node initialized successfully");
 }
@@ -113,14 +125,6 @@ void DepthImageRos2Node::syncCallback(const sensor_msgs::msg::PointCloud2::Const
                                      // const sensor_msgs::msg::CompressedImage::ConstSharedPtr image_msg,
                                      const sensor_msgs::msg::Image::ConstSharedPtr color_msg)
 {
-    pcl::PointCloud<pcl::PointXYZ> cloud;
-    pcl::fromROSMsg(*cloud_msg, cloud);
-    if (cloud.empty())
-    {
-        RCLCPP_WARN(this->get_logger(), "Empty point cloud received");
-        return;
-    }
-
     cv::Mat img_raw;
     try
     {
@@ -139,7 +143,29 @@ void DepthImageRos2Node::syncCallback(const sensor_msgs::msg::PointCloud2::Const
         return;
     }
 
-    auto result = depth_converter_->processCloudAndImage(cloud, img_raw);
+    processCloud(cloud_msg, img_raw, true);
+}
+
+void DepthImageRos2Node::cloudCallback(
+    const sensor_msgs::msg::PointCloud2::ConstSharedPtr cloud_msg)
+{
+    processCloud(cloud_msg, cv::Mat(), false);
+}
+
+void DepthImageRos2Node::processCloud(
+    const sensor_msgs::msg::PointCloud2::ConstSharedPtr cloud_msg,
+    const cv::Mat &image,
+    bool generate_colored_cloud)
+{
+    pcl::PointCloud<pcl::PointXYZ> cloud;
+    pcl::fromROSMsg(*cloud_msg, cloud);
+    if (cloud.empty())
+    {
+        RCLCPP_WARN(this->get_logger(), "Empty point cloud received");
+        return;
+    }
+
+    auto result = depth_converter_->processCloudAndImage(cloud, image, generate_colored_cloud);
 
     if (!result.success)
     {
@@ -148,7 +174,10 @@ void DepthImageRos2Node::syncCallback(const sensor_msgs::msg::PointCloud2::Const
     }
 
     publishDepthImage(result.depth_image, cloud_msg->header);
-    publishDepthCloud(result.colored_cloud, cloud_msg->header);
+    if (generate_colored_cloud)
+    {
+        publishDepthCloud(result.colored_cloud, cloud_msg->header);
+    }
 }
 
 void DepthImageRos2Node::publishDepthImage(const cv::Mat &img,

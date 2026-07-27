@@ -52,7 +52,9 @@ private:
     std::string color_compressed_topic_;
     std::string depth_image_topic_;
     std::string depth_cloud_topic_;
+    bool publish_depth_cloud_ = false;
 
+    ros::Subscriber cloud_only_sub_;
     message_filters::Subscriber<sensor_msgs::PointCloud2> cloud_sub_;
     message_filters::Subscriber<sensor_msgs::Image> color_sub_;
     message_filters::Subscriber<sensor_msgs::CompressedImage> color_compressed_sub_;
@@ -71,6 +73,10 @@ private:
 
     void syncCallback(const sensor_msgs::PointCloud2ConstPtr &cloud_msg,
                       const sensor_msgs::ImageConstPtr &image_msg);
+    void cloudCallback(const sensor_msgs::PointCloud2ConstPtr &cloud_msg);
+    void processCloud(const sensor_msgs::PointCloud2ConstPtr &cloud_msg,
+                      const cv::Mat &image,
+                      bool generate_colored_cloud);
 
 
     void publishDepthImage(const cv::Mat &img,

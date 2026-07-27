@@ -164,6 +164,9 @@ typedef struct  {
 } fpsHandle;
 
 void update_count(fpsHandle* handle) {
+    if (!g_show_fps && !g_devstatus_log) {
+        return;
+    }
     struct timespec now;
     std::lock_guard<std::mutex> lock(handle->fps_mutex);
     clock_gettime(CLOCK_MONOTONIC, &now);
@@ -173,6 +176,11 @@ void update_count(fpsHandle* handle) {
         handle->last = now;
     }
     handle->count++;
+}
+
+static bool rgb_stream_required() {
+    return g_sendrgb || g_sendrgb_compressed || g_sendrgb_undistort ||
+           g_sendcloudrender || g_record_data;
 }
 
 double cal_fps(fpsHandle* handle, const char* name, bool print = false) 
@@ -820,17 +828,12 @@ static void lidar_data_callback(const lidar_data_t *data, void *user_data)
     imu_convert_data_t *imudata = nullptr;
     lidar_device_status_t *dev_info_data;
     
-    pid_t self = getpid();
-    std::vector<pid_t> pids;
-
-    double total_mb = 0.0;
-
     switch(data->type) {
         case LIDAR_DT_NONE:
             printf("empty lidar data type: %x\n", data->type);
             break;
         case LIDAR_DT_RAW_RGB:
-            if (g_sendrgb) {
+            if (rgb_stream_required()) {
                 g_ros_object->publishRgb((capture_Image_List_t *)&data->stream);
             }
             update_count(&rgb_rx_fps);
@@ -871,13 +874,16 @@ static void lidar_data_callback(const lidar_data_t *data, void *user_data)
             }
             update_count(&slam_odom_rx_fps);
             break;
-        case LIDAR_DT_DEV_STATUS:
+        case LIDAR_DT_DEV_STATUS: {
             dev_info_data = (lidar_device_status_t *)data->stream.imageList[0].pAddr;
 
-            pids.push_back(self);
-            collect_children(self, pids);
-            for (pid_t p : pids) {
-                total_mb += read_pss_mb(p); // read_rss_mb(p);
+            double total_mb = 0.0;
+            if (g_devstatus_log || g_show_fps) {
+                std::vector<pid_t> pids{getpid()};
+                collect_children(getpid(), pids);
+                for (pid_t p : pids) {
+                    total_mb += read_pss_mb(p); // read_rss_mb(p);
+                }
             }
 
             if (g_devstatus_log) {
@@ -1020,6 +1026,7 @@ static void lidar_data_callback(const lidar_data_t *data, void *user_data)
                 printf("\n------------------------------------------\n");
             }
             break;
+        }
             case LIDAR_DT_SLAM_ODOMETRY_HIGHFREQ:
             {
                 if (g_sendodom) {
@@ -1165,7 +1172,7 @@ static void lidar_device_callback(const lidar_device_info_t* device, bool attach
         #endif
 
         std::filesystem::path per_con_log_root_dir;
-        {
+        if (g_devstatus_log || g_save_log) {
             auto connection_time = std::chrono::system_clock::now();
             std::time_t t = std::chrono::system_clock::to_time_t(connection_time);
             std::tm tm{};
@@ -1565,31 +1572,31 @@ static void lidar_device_callback(const lidar_device_info_t* device, bool attach
             return;
         }
         
-        std::string dev_status_csv_file_path_ = per_con_log_root_dir / "dev_status.csv";
-
         if (dev_status_csv_file) {
             std::fflush(dev_status_csv_file);
             fclose(dev_status_csv_file);
             dev_status_csv_file = nullptr;
         }
 
-        // Open the file in append mode
-        dev_status_csv_file = fopen(dev_status_csv_file_path_.c_str(), "a");
-        if (!dev_status_csv_file) {
-            #ifdef ROS2
-                RCLCPP_ERROR(rclcpp::get_logger("init"), "Failed to open dev_status CSV file");
-            #else
-                ROS_ERROR("Failed to open dev_status CSV file");
-            #endif
-        } else {
-            const char* header =
-            "uptime_seconds,package_temp,cpu_temp,center_temp,gpu_temp,npu_temp,dtof_tx_temp,dtof_rx_temp,"
-            "cpu0,cpu1,cpu2,cpu3,cpu4,cpu5,cpu6,cpu7,ram_use(%),"
-            "rgb_configured_odr,rgb_tx_odr,rgb_rx_odr,dtof_configured_odr,dtof_tx_odr,dtof_rx_odr,imu_configured_odr,imu_tx_odr,imu_rx_odr,"
-            "slam_cloud_tx_odr,slam_cloud_rx_odr,slam_odom_tx_odr,slam_odom_rx_odr,slam_odom_highfreq_tx_odr,slam_odom_highfreq_rx_odr,"
-            "host_ram_use(mb)\n";
-            fprintf(dev_status_csv_file, "%s", header);
-            std::fflush(dev_status_csv_file);
+        if (g_devstatus_log) {
+            std::string dev_status_csv_file_path_ = per_con_log_root_dir / "dev_status.csv";
+            dev_status_csv_file = fopen(dev_status_csv_file_path_.c_str(), "a");
+            if (!dev_status_csv_file) {
+                #ifdef ROS2
+                    RCLCPP_ERROR(rclcpp::get_logger("init"), "Failed to open dev_status CSV file");
+                #else
+                    ROS_ERROR("Failed to open dev_status CSV file");
+                #endif
+            } else {
+                const char* header =
+                "uptime_seconds,package_temp,cpu_temp,center_temp,gpu_temp,npu_temp,dtof_tx_temp,dtof_rx_temp,"
+                "cpu0,cpu1,cpu2,cpu3,cpu4,cpu5,cpu6,cpu7,ram_use(%),"
+                "rgb_configured_odr,rgb_tx_odr,rgb_rx_odr,dtof_configured_odr,dtof_tx_odr,dtof_rx_odr,imu_configured_odr,imu_tx_odr,imu_rx_odr,"
+                "slam_cloud_tx_odr,slam_cloud_rx_odr,slam_odom_tx_odr,slam_odom_rx_odr,slam_odom_highfreq_tx_odr,slam_odom_highfreq_rx_odr,"
+                "host_ram_use(mb)\n";
+                fprintf(dev_status_csv_file, "%s", header);
+                std::fflush(dev_status_csv_file);
+            }
         }
 
         uint32_t dtof_subframe_odr = 0;
@@ -1609,7 +1616,7 @@ static void lidar_device_callback(const lidar_device_info_t* device, bool attach
             g_rosNodeControlImpl.setDtofSubframeODR(dtof_subframe_odr);
         }
         
-        if (g_sendrgb) {
+        if (rgb_stream_required()) {
             lidar_activate_stream_type(odinDevice, LIDAR_DT_RAW_RGB);
         }
         if (g_sendimu) {

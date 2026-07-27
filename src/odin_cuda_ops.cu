@@ -442,14 +442,21 @@ bool processDepth(
     const float *inverse_map_y,
     std::size_t map_step_floats,
     const DepthParams &params,
+    bool generate_colored_cloud,
     std::vector<float> &depth,
     std::vector<float> &colored_cloud_xyzw,
     std::string &error)
 {
-    if (cloud == nullptr || bgr == nullptr || inverse_map_x == nullptr || inverse_map_y == nullptr ||
-        point_count == 0 || color_width != params.image_width || color_height != params.image_height)
+    if (cloud == nullptr || point_count == 0)
     {
         error = "invalid CUDA depth input";
+        return false;
+    }
+    if (generate_colored_cloud &&
+        (bgr == nullptr || inverse_map_x == nullptr || inverse_map_y == nullptr ||
+         color_width != params.image_width || color_height != params.image_height))
+    {
+        error = "invalid CUDA colored-depth input";
         return false;
     }
 
@@ -464,16 +471,25 @@ bool processDepth(
     const int samples_y = (params.image_height + sampling - 1) / sampling;
     const std::size_t sample_count = static_cast<std::size_t>(samples_x) * samples_y;
 
-    if (!context.cloud.ensure(cloud_bytes) || !context.image.ensure(image_bytes) ||
-        !context.remapped.ensure(image_bytes) || !context.scaled_depth.ensure(scaled_count) ||
-        !context.depth.ensure(pixel_count) || !context.colored.ensure(sample_count) ||
-        !context.matrices.ensure(32))
+    bool buffers_ready = context.cloud.ensure(cloud_bytes) &&
+                         context.scaled_depth.ensure(scaled_count) &&
+                         context.depth.ensure(pixel_count) &&
+                         context.matrices.ensure(32);
+    if (generate_colored_cloud)
+    {
+        buffers_ready = buffers_ready && context.image.ensure(image_bytes) &&
+                        context.remapped.ensure(image_bytes) &&
+                        context.colored.ensure(sample_count);
+    }
+    if (!buffers_ready)
     {
         error = "CUDA depth buffer allocation failed";
         return false;
     }
-    if (context.last_map_x != inverse_map_x || context.last_map_y != inverse_map_y ||
+    if (generate_colored_cloud &&
+        (context.last_map_x != inverse_map_x || context.last_map_y != inverse_map_y ||
         context.last_map_width != params.image_width || context.last_map_height != params.image_height)
+       )
     {
         if (!uploadMaps(context.map_x, context.map_y, inverse_map_x, inverse_map_y,
                         map_step_floats, params.image_width, params.image_height, error))
@@ -485,7 +501,9 @@ bool processDepth(
     }
 
     if (!checkCuda(cudaMemcpy(context.cloud.get(), cloud, cloud_bytes, cudaMemcpyHostToDevice),
-                   "upload point cloud", error) ||
+                   "upload point cloud", error))
+        return false;
+    if (generate_colored_cloud &&
         !checkCuda(cudaMemcpy2D(context.image.get(), params.image_width * 3, bgr, color_step_bytes,
                                params.image_width * 3, params.image_height, cudaMemcpyHostToDevice),
                    "upload color image", error))
@@ -496,7 +514,9 @@ bool processDepth(
 
     float *device_matrix = context.matrices.get();
     if (!checkCuda(cudaMemcpy(device_matrix, params.Kcl, sizeof(params.Kcl), cudaMemcpyHostToDevice),
-                   "upload Kcl", error) ||
+                   "upload Kcl", error))
+        return false;
+    if (generate_colored_cloud &&
         !checkCuda(cudaMemcpy(device_matrix + 16, params.Tlc, sizeof(params.Tlc), cudaMemcpyHostToDevice),
                    "upload Tlc", error))
         return false;
@@ -508,27 +528,34 @@ bool processDepth(
     resizeAndFilterDepth<<<(pixel_count + kThreads - 1) / kThreads, kThreads>>>(
         context.scaled_depth.get(), params.scaled_width, params.scaled_height,
         context.depth.get(), params.image_width, params.image_height);
-    remapBgrKernel<<<(pixel_count + kThreads - 1) / kThreads, kThreads>>>(
-        context.image.get(), context.map_x.get(), context.map_y.get(), context.remapped.get(),
-        params.image_width, params.image_height);
-    buildColoredCloud<<<(sample_count + kThreads - 1) / kThreads, kThreads>>>(
-        context.depth.get(), context.remapped.get(), params.image_width, params.image_height,
-        sampling, samples_x, static_cast<int>(sample_count), params.A11, params.A12,
-        params.A22, params.u0, params.v0, device_matrix + 16, context.colored.get());
+    if (generate_colored_cloud)
+    {
+        remapBgrKernel<<<(pixel_count + kThreads - 1) / kThreads, kThreads>>>(
+            context.image.get(), context.map_x.get(), context.map_y.get(), context.remapped.get(),
+            params.image_width, params.image_height);
+        buildColoredCloud<<<(sample_count + kThreads - 1) / kThreads, kThreads>>>(
+            context.depth.get(), context.remapped.get(), params.image_width, params.image_height,
+            sampling, samples_x, static_cast<int>(sample_count), params.A11, params.A12,
+            params.A22, params.u0, params.v0, device_matrix + 16, context.colored.get());
+    }
 
     if (!checkCuda(cudaGetLastError(), "launch CUDA depth pipeline", error))
         return false;
 
     depth.resize(pixel_count);
-    std::vector<DevicePoint> samples(sample_count);
-    const bool copied = checkCuda(cudaMemcpy(depth.data(), context.depth.get(), pixel_count * sizeof(float),
-                                             cudaMemcpyDeviceToHost), "download depth image", error) &&
-                        checkCuda(cudaMemcpy(samples.data(), context.colored.get(), sample_count * sizeof(DevicePoint),
-                                             cudaMemcpyDeviceToHost), "download colored cloud", error);
-    if (!copied)
+    if (!checkCuda(cudaMemcpy(depth.data(), context.depth.get(), pixel_count * sizeof(float),
+                              cudaMemcpyDeviceToHost), "download depth image", error))
         return false;
 
     colored_cloud_xyzw.clear();
+    if (!generate_colored_cloud)
+        return true;
+
+    std::vector<DevicePoint> samples(sample_count);
+    if (!checkCuda(cudaMemcpy(samples.data(), context.colored.get(), sample_count * sizeof(DevicePoint),
+                              cudaMemcpyDeviceToHost), "download colored cloud", error))
+        return false;
+
     colored_cloud_xyzw.reserve(sample_count * 4);
     for (const DevicePoint &point : samples)
     {

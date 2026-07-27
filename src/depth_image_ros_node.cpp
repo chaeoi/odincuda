@@ -25,22 +25,34 @@ DepthImageRosNode::DepthImageRosNode(ros::NodeHandle &nh, ros::NodeHandle &pnh)
     pnh_.param<std::string>("color_compressed_topic_", color_compressed_topic_, std::string("/odin1/image/compressed"));
     pnh_.param<std::string>("depth_image_topic", depth_image_topic_, std::string("/odin1/depth_img_competetion"));
     pnh_.param<std::string>("depth_cloud_topic", depth_cloud_topic_, std::string("/odin1/depth_img_competetion_cloud"));
+    int senddepthcloud = 0;
+    pnh_.param<int>("register_keys/senddepthcloud", senddepthcloud, 0);
+    publish_depth_cloud_ = senddepthcloud != 0;
 
     ROS_INFO_STREAM("\n  cloud_raw_topic: " << cloud_raw_topic_
                 << "\n  color_raw_topic: " << color_raw_topic_
                 << "\n  color_compressed_topic: " << color_compressed_topic_
                 << "\n  depth_image_topic: " << depth_image_topic_
-                << "\n  depth_cloud_topic: " << depth_cloud_topic_);
+                << "\n  depth_cloud_topic: " << depth_cloud_topic_
+                << "\n  publish_depth_cloud: " << (publish_depth_cloud_ ? "true" : "false"));
 
-    cloud_sub_.subscribe(nh_, cloud_raw_topic_, 1);
-    color_sub_.subscribe(nh_, color_raw_topic_, 1);
-    color_compressed_sub_.subscribe(nh_, color_compressed_topic_, 1);
-
-    sync_ = std::make_shared<Sync>(MySyncPolicy(10), cloud_sub_, color_sub_);
-    sync_->registerCallback(boost::bind(&DepthImageRosNode::syncCallback, this, _1, _2));
+    if (publish_depth_cloud_)
+    {
+        cloud_sub_.subscribe(nh_, cloud_raw_topic_, 1);
+        color_sub_.subscribe(nh_, color_raw_topic_, 1);
+        sync_ = std::make_shared<Sync>(MySyncPolicy(10), cloud_sub_, color_sub_);
+        sync_->registerCallback(boost::bind(&DepthImageRosNode::syncCallback, this, _1, _2));
+    }
+    else
+    {
+        cloud_only_sub_ = nh_.subscribe(cloud_raw_topic_, 1, &DepthImageRosNode::cloudCallback, this);
+    }
 
     depth_image_pub_ = it_.advertise(depth_image_topic_, 1);
-    depth_cloud_pub_ = nh_.advertise<sensor_msgs::PointCloud2>(depth_cloud_topic_, 1);
+    if (publish_depth_cloud_)
+    {
+        depth_cloud_pub_ = nh_.advertise<sensor_msgs::PointCloud2>(depth_cloud_topic_, 1);
+    }
 
     ROS_INFO("DepthImageRosNode initialized successfully");
 }
@@ -106,14 +118,6 @@ PointCloudToDepthConverter::CameraParams DepthImageRosNode::loadCameraParams()
 void DepthImageRosNode::syncCallback(const sensor_msgs::PointCloud2ConstPtr &cloud_msg,
                                      const sensor_msgs::ImageConstPtr &image_msg)
 {
-    pcl::PointCloud<pcl::PointXYZ> cloud;
-    pcl::fromROSMsg(*cloud_msg, cloud);
-    if (cloud.empty())
-    {
-        ROS_WARN("Empty point cloud received");
-        return;
-    }
-
     cv::Mat img_raw;
     try
     {
@@ -132,7 +136,27 @@ void DepthImageRosNode::syncCallback(const sensor_msgs::PointCloud2ConstPtr &clo
         return;
     }
 
-    auto result = depth_converter_->processCloudAndImage(cloud, img_raw);
+    processCloud(cloud_msg, img_raw, true);
+}
+
+void DepthImageRosNode::cloudCallback(const sensor_msgs::PointCloud2ConstPtr &cloud_msg)
+{
+    processCloud(cloud_msg, cv::Mat(), false);
+}
+
+void DepthImageRosNode::processCloud(const sensor_msgs::PointCloud2ConstPtr &cloud_msg,
+                                     const cv::Mat &image,
+                                     bool generate_colored_cloud)
+{
+    pcl::PointCloud<pcl::PointXYZ> cloud;
+    pcl::fromROSMsg(*cloud_msg, cloud);
+    if (cloud.empty())
+    {
+        ROS_WARN("Empty point cloud received");
+        return;
+    }
+
+    auto result = depth_converter_->processCloudAndImage(cloud, image, generate_colored_cloud);
 
     if (!result.success)
     {
@@ -141,7 +165,10 @@ void DepthImageRosNode::syncCallback(const sensor_msgs::PointCloud2ConstPtr &clo
     }
 
     publishDepthImage(result.depth_image, cloud_msg->header);
-    publishDepthCloud(result.colored_cloud, cloud_msg->header);
+    if (generate_colored_cloud)
+    {
+        publishDepthCloud(result.colored_cloud, cloud_msg->header);
+    }
 }
 
 void DepthImageRosNode::publishDepthImage(const cv::Mat &img,
