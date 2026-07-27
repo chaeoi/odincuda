@@ -36,9 +36,9 @@ register_keys:
   # Odometry data
   sendodom: 0             # 0: off; 1: on
 
-  # TF from odom to base_link. Leave it on unless you specifically need it off.
-  # Keep enabled when downstream nodes need the odom-to-base_link transform.
-  send_odom_baselink_tf: 0 # 0: off; 1: on.
+  # TF from odom to base_link, required by the navigation node.
+  # This can remain enabled while sendodom is off to avoid unused odometry topics.
+  send_odom_baselink_tf: 1 # 0: off; 1: on.
 
   # raw dtof data
   senddtof: 1             # 0: off; 1: on

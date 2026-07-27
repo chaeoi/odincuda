@@ -145,9 +145,9 @@ PointCloudToDepthConverter::ProcessResult PointCloudToDepthConverter::processClo
             }
         }
 
-        std::vector<float> gpu_depth;
         std::vector<float> gpu_colored_cloud;
         std::string gpu_error;
+        result.depth_image.create(params_.image_height, params_.image_width, CV_32FC1);
         const auto *cloud_data = reinterpret_cast<const float *>(cloud.points.data());
         const std::size_t point_stride_floats = sizeof(pcl::PointXYZ) / sizeof(float);
         if (odin_cuda::processDepth(
@@ -163,13 +163,11 @@ PointCloudToDepthConverter::ProcessResult PointCloudToDepthConverter::processClo
                 inv_map_x_.step / sizeof(float),
                 gpu_params,
                 generate_colored_cloud,
-                gpu_depth,
+                result.depth_image.ptr<float>(),
+                result.depth_image.total(),
                 gpu_colored_cloud,
                 gpu_error))
         {
-            cv::Mat processed_depth(params_.image_height, params_.image_width, CV_32FC1,
-                                    gpu_depth.data());
-            result.depth_image = processed_depth.clone();
             if (generate_colored_cloud)
             {
                 result.colored_cloud.points.resize(gpu_colored_cloud.size() / 4);

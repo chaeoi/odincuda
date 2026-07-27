@@ -103,7 +103,7 @@ test -f ~/odin_gpu_ws/src/odin_ros_driver/config/calib.yaml && echo "标定文�
 
 ```bash
 cd ~/odin_gpu_ws/src/odin_ros_driver
-grep -E 'sendrgb:|sendrgbundistort:|sendimu:|sendodom:|senddtof:|senddepth:|senddepthcloud:' \
+grep -E 'sendrgb:|sendrgbundistort:|sendimu:|sendodom:|send_odom_baselink_tf:|senddtof:|senddepth:|senddepthcloud:' \
   config/control_command.yaml
 ```
 
@@ -114,13 +114,15 @@ sendrgb: 0
 sendrgbundistort: 1
 sendimu: 0
 sendodom: 0
+send_odom_baselink_tf: 1
 senddtof: 1
 senddepth: 1
 senddepthcloud: 0
 ```
 
-需要 IMU、里程计或原始 RGB 时，将对应开关改为 `1` 后重新启动驱动即可。需要彩色
-深度点云时，同时设置 `senddepthcloud: 1` 和 `sendrgb: 1`。
+默认不发布里程计话题，但保留导航需要的 `odom -> odin1_base_link` TF。需要 IMU、
+里程计话题或原始 RGB 时，将对应开关改为 `1` 后重新启动驱动即可。需要彩色深度点云
+时，同时设置 `senddepthcloud: 1` 和 `sendrgb: 1`。
 
 ## 六、编译 ROS2 GPU 版本
 

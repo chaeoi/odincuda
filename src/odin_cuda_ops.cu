@@ -443,7 +443,8 @@ bool processDepth(
     std::size_t map_step_floats,
     const DepthParams &params,
     bool generate_colored_cloud,
-    std::vector<float> &depth,
+    float *depth,
+    std::size_t depth_capacity,
     std::vector<float> &colored_cloud_xyzw,
     std::string &error)
 {
@@ -466,6 +467,11 @@ bool processDepth(
     const std::size_t image_bytes = static_cast<std::size_t>(params.image_width) * params.image_height * 3;
     const std::size_t scaled_count = static_cast<std::size_t>(params.scaled_width) * params.scaled_height;
     const std::size_t pixel_count = static_cast<std::size_t>(params.image_width) * params.image_height;
+    if (depth == nullptr || depth_capacity < pixel_count)
+    {
+        error = "CUDA depth output buffer is too small";
+        return false;
+    }
     const int sampling = std::max(1, params.point_sampling_rate);
     const int samples_x = (params.image_width + sampling - 1) / sampling;
     const int samples_y = (params.image_height + sampling - 1) / sampling;
@@ -542,8 +548,7 @@ bool processDepth(
     if (!checkCuda(cudaGetLastError(), "launch CUDA depth pipeline", error))
         return false;
 
-    depth.resize(pixel_count);
-    if (!checkCuda(cudaMemcpy(depth.data(), context.depth.get(), pixel_count * sizeof(float),
+    if (!checkCuda(cudaMemcpy(depth, context.depth.get(), pixel_count * sizeof(float),
                               cudaMemcpyDeviceToHost), "download depth image", error))
         return false;
 

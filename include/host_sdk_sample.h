@@ -1259,7 +1259,8 @@ void publishRgb(capture_Image_List_t *stream) {
 #endif
     }
 
-    void publishOdometry(capture_Image_List_t* stream, OdometryType odom_type, bool show_path, bool show_camerapose) {
+    void publishOdometry(capture_Image_List_t* stream, OdometryType odom_type, bool show_path,
+                         bool show_camerapose, bool publish_topic = true) {
         
 #ifdef ROS2
             auto msg = nav_msgs::msg::Odometry();
@@ -1369,7 +1370,9 @@ void publishRgb(capture_Image_List_t *stream) {
                         transformStamped.transform.rotation.w = msg.pose.pose.orientation.w;
                         tf_broadcaster->sendTransform(transformStamped);
                     }
-                    odom_publisher_->publish(msg);
+                    if (publish_topic) {
+                        odom_publisher_->publish(msg);
+                    }
 
                     // Publish odom trajectory as visualization markers (green lines connecting adjacent points)
                     static visualization_msgs::msg::Marker marker;
@@ -1465,7 +1468,9 @@ void publishRgb(capture_Image_List_t *stream) {
                         transformStamped.transform.rotation.w = msg.pose.pose.orientation.w;
                         tf_broadcaster->sendTransform(transformStamped);
                     }
-                    odom_publisher_.publish(msg);
+                    if (publish_topic) {
+                        odom_publisher_.publish(msg);
+                    }
 
                     if (show_path) {
                         // Publish odom trajectory as visualization markers (green lines connecting adjacent points)
@@ -1752,8 +1757,8 @@ private:
                                     .reliability(RMW_QOS_POLICY_RELIABILITY_RELIABLE)
                                     .durability(RMW_QOS_POLICY_DURABILITY_VOLATILE);
 
-            // Large sensor data with larger queue to avoid blocking
-            auto qos_sensor = rclcpp::QoS(10)
+            // Real-time sensor streams should drop stale frames instead of accumulating them.
+            auto qos_sensor = rclcpp::QoS(1)
                                     .reliability(RMW_QOS_POLICY_RELIABILITY_RELIABLE)
                                     .durability(RMW_QOS_POLICY_DURABILITY_VOLATILE);
 
@@ -1775,19 +1780,19 @@ private:
     }
     #ifdef ROS1
         void initialize_publishers(ros::NodeHandle& nh) {
-            imu_pub_ = nh.advertise<ros::Imu>("odin1/imu", 4000);
-            rgb_pub_ = nh.advertise<ros::Image>("odin1/image", 100);
-            cloud_pub_ = nh.advertise<ros::PointCloud2>("odin1/cloud_raw", 100);
-            xyzrgbacloud_pub_ = nh.advertise<ros::PointCloud2>("odin1/cloud_slam", 100);
-            odom_publisher_ = nh.advertise<ros::Odometry>("odin1/odometry", 100);
-            odom_highfreq_publisher_ = nh.advertise<ros::Odometry>("odin1/odometry_highfreq", 4000);
-            path_publisher_ = nh.advertise<visualization_msgs::MarkerArray>("odin1/path", 100);
-            pub_camera_pose_visual_ = nh.advertise<visualization_msgs::MarkerArray>("odin1/camera_pose_visual", 100);
-            rgbcloud_pub_ = nh.advertise<sensor_msgs::PointCloud2>("odin1/cloud_render", 100);
-            compressed_rgb_pub_ = nh.advertise<sensor_msgs::CompressedImage>("odin1/image/compressed", 100);
-            undistort_rgb_pub_ = nh.advertise<sensor_msgs::Image>("odin1/image/undistorted", 100);
-            intensity_gray_pub_ = nh.advertise<sensor_msgs::Image>("odin1/image/intensity_gray", 100);
-            wiwc_publisher_ = nh.advertise<ros::Odometry>("odin1/wiwc", 100);
+            imu_pub_ = nh.advertise<ros::Imu>("odin1/imu", 100);
+            rgb_pub_ = nh.advertise<ros::Image>("odin1/image", 1);
+            cloud_pub_ = nh.advertise<ros::PointCloud2>("odin1/cloud_raw", 1);
+            xyzrgbacloud_pub_ = nh.advertise<ros::PointCloud2>("odin1/cloud_slam", 1);
+            odom_publisher_ = nh.advertise<ros::Odometry>("odin1/odometry", 10);
+            odom_highfreq_publisher_ = nh.advertise<ros::Odometry>("odin1/odometry_highfreq", 100);
+            path_publisher_ = nh.advertise<visualization_msgs::MarkerArray>("odin1/path", 1);
+            pub_camera_pose_visual_ = nh.advertise<visualization_msgs::MarkerArray>("odin1/camera_pose_visual", 1);
+            rgbcloud_pub_ = nh.advertise<sensor_msgs::PointCloud2>("odin1/cloud_render", 1);
+            compressed_rgb_pub_ = nh.advertise<sensor_msgs::CompressedImage>("odin1/image/compressed", 1);
+            undistort_rgb_pub_ = nh.advertise<sensor_msgs::Image>("odin1/image/undistorted", 1);
+            intensity_gray_pub_ = nh.advertise<sensor_msgs::Image>("odin1/image/intensity_gray", 1);
+            wiwc_publisher_ = nh.advertise<ros::Odometry>("odin1/wiwc", 10);
             tf_broadcaster = std::make_unique<tf2_ros::TransformBroadcaster>();
         }
     #endif

@@ -869,8 +869,9 @@ static void lidar_data_callback(const lidar_data_t *data, void *user_data)
             update_count(&slam_cloud_rx_fps);
             break;
         case LIDAR_DT_SLAM_ODOMETRY:
-            if (g_sendodom) {
-                g_ros_object->publishOdometry((capture_Image_List_t *)&data->stream, OdometryType::STANDARD, g_show_path, g_show_camerapose);
+            if (g_sendodom || g_send_odom_baselink_tf) {
+                g_ros_object->publishOdometry((capture_Image_List_t *)&data->stream, OdometryType::STANDARD,
+                                              g_show_path, g_show_camerapose, g_sendodom);
             }
             update_count(&slam_odom_rx_fps);
             break;
@@ -1052,8 +1053,9 @@ static void lidar_data_callback(const lidar_data_t *data, void *user_data)
             break;
             case LIDAR_DT_SLAM_WIWC:
             {
-                // Always publish WIWC data for real-time extrinsics
-                g_ros_object->publishWiwc((capture_Image_List_t *)&data->stream);
+                if (g_sendodom) {
+                    g_ros_object->publishWiwc((capture_Image_List_t *)&data->stream);
+                }
                 
                 if(g_record_data ) {
                     g_ros_object->recordrotate((capture_Image_List_t *)&data->stream);
@@ -1622,7 +1624,7 @@ static void lidar_device_callback(const lidar_device_info_t* device, bool attach
         if (g_sendimu) {
             lidar_activate_stream_type(odinDevice, LIDAR_DT_RAW_IMU);
         }
-        if (g_sendodom) {
+        if (g_sendodom || g_send_odom_baselink_tf) {
             lidar_activate_stream_type(odinDevice, LIDAR_DT_SLAM_ODOMETRY);
         }
         if (g_senddtof) {
@@ -1636,8 +1638,9 @@ static void lidar_device_callback(const lidar_device_info_t* device, bool attach
         deviceConnected = true;
         deviceDisconnected = false;
         
-        // Start IMU dedicated thread
-        start_imu_thread();
+        if (g_sendimu) {
+            start_imu_thread();
+        }
         
         // Start custom parameter monitoring thread
         g_param_monitor_running = true;
@@ -1777,9 +1780,7 @@ int main(int argc, char *argv[])
         g_use_host_ros_time = get_key_value("use_host_ros_time", 0);
         g_save_log = get_key_value("save_log", 0);
 
-        if (g_send_odom_baselink_tf) {
-            g_rosNodeControlImpl.setSendOdomBaseLinkTF(true);
-        }
+        g_rosNodeControlImpl.setSendOdomBaseLinkTF(g_send_odom_baselink_tf != 0);
 
         auto get_key_str_value = [&](const std::string& key, const std::string& default_value) -> std::string {
             auto it = keys_w_str_val.find(key);
@@ -2029,7 +2030,7 @@ int main(int argc, char *argv[])
     // Cleanup on normal program exit
     if (odinDevice) {
         // Convert calib.yaml to cam_in_ex.txt at program end
-        if (g_ros_object) {
+        if (g_record_data && g_ros_object) {
             const std::filesystem::path out_path = g_ros_object->get_root_dir() / "image" / "cam_in_ex.txt";
             (void)convert_calib_to_cam_in_ex(calib_file_, out_path);
         }

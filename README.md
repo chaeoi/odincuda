@@ -31,10 +31,12 @@
 - `/odin1/image/undistorted`
 - `/odin1/cloud_raw`，供深度节点输入
 - `/odin1/depth_img_competetion`
+- `/tf` 中的 `odom -> odin1_base_link`，供导航节点使用
 
-原始 RGB、压缩 RGB、IMU、里程计、SLAM 点云、渲染点云、彩色深度点云、状态
-CSV 均默认关闭。需要这些数据时，在 `config/control_command.yaml` 中把对应开关改为
-`1` 即可。开启 `senddepthcloud` 时还需同时开启 `sendrgb`。
+原始 RGB、压缩 RGB、IMU、里程计话题、SLAM 点云、渲染点云、彩色深度点云、状态
+CSV 均默认关闭。导航所需的 TF 独立保留，不会同时发布未使用的里程计话题。需要这些
+数据时，在 `config/control_command.yaml` 中把对应开关改为 `1` 即可。开启
+`senddepthcloud` 时还需同时开启 `sendrgb`。
 
 ## 目标环境
 

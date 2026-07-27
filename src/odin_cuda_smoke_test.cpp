@@ -115,14 +115,14 @@ int main()
     depth_params.Kcl[5] = 10.0f;
     depth_params.Kcl[7] = 4.0f;
 
-    std::vector<float> depth;
+    std::vector<float> depth(width * height);
     std::vector<float> depth_cloud;
     error.clear();
     if (!odin_cuda::processDepth(
             reinterpret_cast<const float *>(points.data()), points.size(), 4,
             image.data(), width, height, width * 3,
             map_x.data(), map_y.data(), width,
-            depth_params, true, depth, depth_cloud, error))
+            depth_params, true, depth.data(), depth.size(), depth_cloud, error))
     {
         std::cerr << "depth pipeline failed: " << error << std::endl;
         return 5;
@@ -135,13 +135,13 @@ int main()
         return 6;
     }
 
-    std::vector<float> depth_only;
+    std::vector<float> depth_only(width * height);
     std::vector<float> unused_depth_cloud{1.0f};
     error.clear();
     if (!odin_cuda::processDepth(
             reinterpret_cast<const float *>(points.data()), points.size(), 4,
             nullptr, 0, 0, 0, nullptr, nullptr, 0,
-            depth_params, false, depth_only, unused_depth_cloud, error))
+            depth_params, false, depth_only.data(), depth_only.size(), unused_depth_cloud, error))
     {
         std::cerr << "depth-only pipeline failed: " << error << std::endl;
         return 7;

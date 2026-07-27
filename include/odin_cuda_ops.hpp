@@ -55,7 +55,8 @@ bool processDepth(
     std::size_t map_step_floats,
     const DepthParams &params,
     bool generate_colored_cloud,
-    std::vector<float> &depth,
+    float *depth,
+    std::size_t depth_capacity,
     std::vector<float> &colored_cloud_xyzw,
     std::string &error);
 
