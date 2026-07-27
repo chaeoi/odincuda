@@ -19,13 +19,6 @@ def generate_launch_description():
         description='Path to the control config YAML file'
     )
     
-    # Add RViz2 configuration file parameter
-    rviz_config_arg = DeclareLaunchArgument(
-        'rviz_config',
-        default_value=os.path.join(package_dir, 'config', 'odin_ros2.rviz'),
-        description='Path to RViz2 config file'
-    )
-    
     # Create main node
     host_sdk_node = Node(
         package='odin_ros_driver',
@@ -77,23 +70,12 @@ def generate_launch_description():
         parameters=[overlay_params]
     )
 
-    # Create RViz2 node - loads specified configuration file
-    rviz_node = Node(
-        package='rviz2',
-        executable='rviz2',
-        name='rviz2',
-        output='screen',
-        arguments=['-d', LaunchConfiguration('rviz_config')]
-    )
-    
     # Create launch description
     ld = LaunchDescription()
     ld.add_action(config_file_arg)
-    ld.add_action(rviz_config_arg)  # Add RViz configuration argument
     ld.add_action(host_sdk_node)
     ld.add_action(pcd2depth_node)
     ld.add_action(cloud_reprojection_node)
     ld.add_action(image_overlay_node)
-    ld.add_action(rviz_node)  # Add RViz node
     
     return ld

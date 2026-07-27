@@ -50,7 +50,9 @@ private:
     std::string color_raw_topic_;
     std::string depth_image_topic_;
     std::string depth_cloud_topic_;
+    bool publish_depth_cloud_ = false;
 
+    rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr cloud_only_sub_;
     message_filters::Subscriber<sensor_msgs::msg::PointCloud2> cloud_sub_;
     message_filters::Subscriber<sensor_msgs::msg::CompressedImage> color_compressed_sub_;
     message_filters::Subscriber<sensor_msgs::msg::Image> color_sub_;
@@ -74,6 +76,10 @@ private:
     void syncCallback(const sensor_msgs::msg::PointCloud2::ConstSharedPtr cloud_msg,
                       // const sensor_msgs::msg::CompressedImage::ConstSharedPtr image_msg,
                       const sensor_msgs::msg::Image::ConstSharedPtr color_msg);
+    void cloudCallback(const sensor_msgs::msg::PointCloud2::ConstSharedPtr cloud_msg);
+    void processCloud(const sensor_msgs::msg::PointCloud2::ConstSharedPtr cloud_msg,
+                      const cv::Mat &image,
+                      bool generate_colored_cloud);
 
 
     void publishDepthImage(const cv::Mat &img,

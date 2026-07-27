@@ -7,12 +7,22 @@ WORKSPACE_ROOT="$(dirname "$(dirname "$PKG_DIR")")"
 # Workspace source directory (contains all packages)
 WORKSPACE_SRC="${WORKSPACE_ROOT}/src"
 PROJECT_NAME="odin_ros_driver"
+PACKAGE_BACKUP=""
 
 # Define color codes
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' 
+
+restore_package_xml() {
+    if [[ -n "$PACKAGE_BACKUP" && -f "$PACKAGE_BACKUP" ]]; then
+        cp "$PACKAGE_BACKUP" "${PKG_DIR}/package.xml"
+        rm -f "$PACKAGE_BACKUP"
+    fi
+}
+
+trap restore_package_xml EXIT INT TERM
 
 # Clean workspace function
 clean_workspace() {
@@ -33,7 +43,7 @@ run_node() {
     
     # Check if environment file exists
     if [ ! -f "${WORKSPACE_ROOT}/devel/setup.bash" ]; then
-        echo -e "${RED}Could not find devel/setup.bash, please build the project with ./build_ros1.sh first${NC}"
+        echo -e "${RED}Could not find devel/setup.bash, please build the project with ./build_ros.sh first${NC}"
         return 1
     fi
     
@@ -52,10 +62,6 @@ build_workspace() {
     
     echo -e "${YELLOW}Starting ROS1 project build...${NC}"
     
-    # Clean
-    cd $WS_DIR
-    rm -rf build devel install
-    
     # Ensure ROS1 environment is loaded
     if [ -f "/opt/ros/noetic/setup.bash" ]; then
         source "/opt/ros/noetic/setup.bash"
@@ -66,11 +72,11 @@ build_workspace() {
         return 1
     fi
     
-    # Create temporary package.xml
-    if [ -f "${PKG_DIR}/package_ros1.xml" ]; then
+    if [ -f "${PKG_DIR}/package_ros1.xml" ] && [ -f "${PKG_DIR}/package.xml" ]; then
         echo "Creating temporary package.xml (using package_ros1.xml)"
-        cp "${PKG_DIR}/package_ros1.xml" "${PKG_DIR}/package.xml"
-        TEMP_PACKAGE=true
+        PACKAGE_BACKUP="$(mktemp)" || return 1
+        cp "${PKG_DIR}/package.xml" "$PACKAGE_BACKUP" || return 1
+        cp "${PKG_DIR}/package_ros1.xml" "${PKG_DIR}/package.xml" || return 1
     elif [ -f "${PKG_DIR}/package.xml" ]; then
         echo "Using existing package.xml"
     else
@@ -83,7 +89,12 @@ build_workspace() {
     
     # Switch to workspace root and build
     cd "${WORKSPACE_ROOT}" || return 1
-    catkin_make -DBUILD_SYSTEM=ROS1 -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -j$(nproc)
+    catkin_make \
+        -DBUILD_SYSTEM=ROS1 \
+        -DODIN_BUILD_CUDA=ON \
+        -DODIN_CUDA_ARCH=87 \
+        -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+        -j"$(nproc)"
     BUILD_RESULT=$?
     
     # If build successful, source environment
@@ -93,8 +104,8 @@ build_workspace() {
     else
         echo -e "${RED}ROS1 build failed, please check error logs${NC}"
     fi
-    
 
+    return "$BUILD_RESULT"
 }
 
 # Help function

@@ -35,6 +35,9 @@ limitations under the License.
 #include "lidar_api.h"
 #include "lidar_api_type.h"
 #include "rawCloudRender.h"
+#ifdef ODIN_ENABLE_CUDA
+#include "odin_cuda_ops.hpp"
+#endif
 #include <deque> 
 #include <mutex>  
 #include <vector> 
@@ -69,6 +72,9 @@ enum class OdometryType {
 
 
 extern int g_log_level;
+extern int g_sendrgb;
+extern int g_sendrgb_compressed;
+extern int g_sendrgb_undistort;
 extern int g_sendcloudrender;
 extern int g_use_host_ros_time;
 double get_ptp_smoothed_delay();
@@ -477,54 +483,105 @@ void process_pair(const ImageConstPtr &rgb_msg, const PointCloud2ConstPtr &pcd_m
         return;
     }
 
-    // Prepare point cloud data stream
-    capture_Image_List_t cloud_stream;
-    const int pcd_idx = 2;
-    cloud_stream.imageList[pcd_idx].height = pcd_msg->height;
-    cloud_stream.imageList[pcd_idx].width = pcd_msg->width;
-
     const auto total_point_num = pcd_msg->width * pcd_msg->height;
-    sensor_msgs::PointCloud2ConstIterator<float> iter_x(*pcd_msg, "x");
-    sensor_msgs::PointCloud2ConstIterator<float> iter_y(*pcd_msg, "y");
-    sensor_msgs::PointCloud2ConstIterator<float> iter_z(*pcd_msg, "z");
-    std::vector<float> cloud_flat;
-    cloud_flat.reserve(total_point_num * 4);
-
-    for (; iter_x != iter_x.end(); ++iter_x, ++iter_y, ++iter_z) {
-        cloud_flat.push_back(*iter_y * -1000.0f);
-        cloud_flat.push_back(*iter_z * 1000.0f);
-        cloud_flat.push_back(*iter_x * 1000.0f);
-        cloud_flat.push_back(0.0f);
-    }
-    cloud_stream.imageList[pcd_idx].pAddr = cloud_flat.data();
-
-    
     if (input_image_height > 0 && input_image_width > 0) {
-        // Use BGR8 image data directly
-        std::vector<std::vector<float>> rgb_image(input_image_height, std::vector<float>(input_image_width));
-        
-        // Convert BGR8 data to required format for rendering
-        const uint8_t* bgr_data = rgb_msg->data.data();
-        for (int y = 0; y < input_image_height; ++y) {
-            for (int x = 0; x < input_image_width; ++x) {
-                // Start position of each pixel (BGR format)
-                int idx = y * rgb_msg->step + x * 3;
-                
-                // Extract RGB values and combine into 32-bit integer
-                uint8_t b = bgr_data[idx];
-                uint8_t g = bgr_data[idx + 1];
-                uint8_t r = bgr_data[idx + 2];
-                uint32_t rgb_int = (r << 16) | (g << 8) | b;
-                
-                // Convert to float
-                float rgb_float;
-                std::memcpy(&rgb_float, &rgb_int, sizeof(float));
-                rgb_image[y][x] = rgb_float;
+        std::vector<float> rgbCloud_flat;
+        bool rendered_on_gpu = false;
+
+#ifdef ODIN_ENABLE_CUDA
+        std::size_t x_offset = 0;
+        std::size_t y_offset = 0;
+        std::size_t z_offset = 0;
+        bool found_x = false;
+        bool found_y = false;
+        bool found_z = false;
+        for (const auto &field : pcd_msg->fields) {
+            if (field.name == "x") { x_offset = field.offset; found_x = true; }
+            else if (field.name == "y") { y_offset = field.offset; found_y = true; }
+            else if (field.name == "z") { z_offset = field.offset; found_z = true; }
+        }
+
+        if (found_x && found_y && found_z) {
+            odin_cuda::RawRenderParams gpu_params;
+            gpu_params.image_width = input_image_width;
+            gpu_params.image_height = input_image_height;
+            gpu_params.fx = GlobalCameraParams::g_fx;
+            gpu_params.fy = GlobalCameraParams::g_fy;
+            gpu_params.cx = GlobalCameraParams::g_cx;
+            gpu_params.cy = GlobalCameraParams::g_cy;
+            gpu_params.skew = GlobalCameraParams::g_skew;
+            gpu_params.k2 = GlobalCameraParams::g_k2;
+            gpu_params.k3 = GlobalCameraParams::g_k3;
+            gpu_params.k4 = GlobalCameraParams::g_k4;
+            gpu_params.k5 = GlobalCameraParams::g_k5;
+            gpu_params.k6 = GlobalCameraParams::g_k6;
+            gpu_params.k7 = GlobalCameraParams::g_k7;
+            for (int row = 0; row < 4; ++row) {
+                for (int column = 0; column < 4; ++column) {
+                    gpu_params.camera_from_lidar[row * 4 + column] =
+                        GlobalCameraParams::g_T_camera_lidar(row, column);
+                }
+            }
+
+            std::string gpu_error;
+            rendered_on_gpu = odin_cuda::renderColoredCloud(
+                pcd_msg->data.data(), total_point_num, pcd_msg->point_step,
+                x_offset, y_offset, z_offset,
+                rgb_msg->data.data(), input_image_width, input_image_height, rgb_msg->step,
+                gpu_params, rgbCloud_flat, gpu_error);
+            if (!rendered_on_gpu) {
+                static bool cuda_render_warning_printed = false;
+                if (!cuda_render_warning_printed) {
+#ifdef ROS2
+                    RCLCPP_WARN(rclcpp::get_logger("publishRgbCloud"),
+                                "CUDA cloud renderer unavailable, using CPU fallback: %s",
+                                gpu_error.c_str());
+#else
+                    ROS_WARN("CUDA cloud renderer unavailable, using CPU fallback: %s", gpu_error.c_str());
+#endif
+                    cuda_render_warning_printed = true;
+                }
             }
         }
-        // Render colored point cloud
-        std::vector<float> rgbCloud_flat;
-        render_.render(rgb_image, &cloud_stream, pcd_idx, rgbCloud_flat);
+#endif
+
+        if (!rendered_on_gpu) {
+            capture_Image_List_t cloud_stream{};
+            const int pcd_idx = 2;
+            cloud_stream.imageList[pcd_idx].height = pcd_msg->height;
+            cloud_stream.imageList[pcd_idx].width = pcd_msg->width;
+
+            sensor_msgs::PointCloud2ConstIterator<float> iter_x(*pcd_msg, "x");
+            sensor_msgs::PointCloud2ConstIterator<float> iter_y(*pcd_msg, "y");
+            sensor_msgs::PointCloud2ConstIterator<float> iter_z(*pcd_msg, "z");
+            std::vector<float> cloud_flat;
+            cloud_flat.reserve(total_point_num * 4);
+            for (; iter_x != iter_x.end(); ++iter_x, ++iter_y, ++iter_z) {
+                cloud_flat.push_back(*iter_y * -1000.0f);
+                cloud_flat.push_back(*iter_z * 1000.0f);
+                cloud_flat.push_back(*iter_x * 1000.0f);
+                cloud_flat.push_back(0.0f);
+            }
+            cloud_stream.imageList[pcd_idx].pAddr = cloud_flat.data();
+
+            std::vector<std::vector<float>> rgb_image(
+                input_image_height, std::vector<float>(input_image_width));
+            const uint8_t* bgr_data = rgb_msg->data.data();
+            for (int y = 0; y < input_image_height; ++y) {
+                for (int x = 0; x < input_image_width; ++x) {
+                    const int idx = y * rgb_msg->step + x * 3;
+                    const uint32_t rgb_int =
+                        (static_cast<uint32_t>(bgr_data[idx + 2]) << 16) |
+                        (static_cast<uint32_t>(bgr_data[idx + 1]) << 8) |
+                        static_cast<uint32_t>(bgr_data[idx]);
+                    float rgb_float;
+                    std::memcpy(&rgb_float, &rgb_int, sizeof(float));
+                    rgb_image[y][x] = rgb_float;
+                }
+            }
+            render_.render(rgb_image, &cloud_stream, pcd_idx, rgbCloud_flat);
+        }
+
         const int valid_point_num = rgbCloud_flat.size() / 4;
          
         // Create and publish RGB point cloud
@@ -762,97 +819,123 @@ void publishRgb(capture_Image_List_t *stream) {
         #else
             ROS_INFO("old format rgb data, please upgrade device firmware");
         #endif
-    } else {// new version jpeg data
-
-        std::vector<uint8_t> jpeg_data(static_cast<uint8_t*>(image.pAddr),
-                                        static_cast<uint8_t*>(image.pAddr) + image.length);
-
-        // convert back to bgr8                                                
-        cv::Mat decoded_image = cv::imdecode(jpeg_data, cv::IMREAD_COLOR);
-
-        cv_bridge::CvImage cv_image;
-        #ifdef ROS2
-            cv_image.header.stamp = make_aligned_stamp(stream->imageList[0].timestamp, node_);
-        #else
-            cv_image.header.stamp = make_aligned_stamp(stream->imageList[0].timestamp);
-        #endif
-        cv_image.encoding = "bgr8";
-        cv_image.image = decoded_image;
-
-        if (g_sendcloudrender) {
-            std::lock_guard<std::mutex> lock(rgb_queue_mutex_);
-            if (rgb_image_queue_.size() >= 10) {
-                rgb_image_queue_.pop_front();
-            }
-            rgb_image_queue_.push_back(cv_image.toImageMsg());
-            }        
-
-        // Enqueue binary logging for image
-        if (data_logger_) {
-            const uint32_t idx_now = image_index_.fetch_add(1, std::memory_order_relaxed);
-            const double ts_sec = static_cast<double>(stream->imageList[0].timestamp) / 1e9;
-            const uint32_t jpeg_size = static_cast<uint32_t>(jpeg_data.size());
-            std::vector<uint8_t> blob;
-            blob.reserve(sizeof(uint32_t) + sizeof(double) + sizeof(uint32_t) + jpeg_size);
-            auto append_pod = [&](const auto& v) {
-                const uint8_t* p = reinterpret_cast<const uint8_t*>(&v);
-                blob.insert(blob.end(), p, p + sizeof(v));
-            };
-            append_pod(idx_now);
-            append_pod(ts_sec);
-            append_pod(jpeg_size);
-            blob.insert(blob.end(), jpeg_data.begin(), jpeg_data.end());
-            data_logger_->enqueueImageFrame(std::move(blob));
-        }
-
-        // undistort image
-        cv::Mat undistorted_image = cv::Mat::zeros(decoded_image.size(), decoded_image.type());
-        cv_bridge::CvImage cv_undistorted_image;
-
-        if (m_undistort_map_init_success) {
-            cv::remap(decoded_image, undistorted_image, m_undistort_map_x, m_undistort_map_y, cv::INTER_LINEAR);
-            #ifdef ROS2
-                cv_undistorted_image.header.stamp = make_aligned_stamp(stream->imageList[0].timestamp, node_);
-            #else
-                cv_undistorted_image.header.stamp = make_aligned_stamp(stream->imageList[0].timestamp);
-            #endif
-            cv_undistorted_image.encoding = "bgr8";
-            cv_undistorted_image.image = undistorted_image;
-        }
-
-        #ifdef ROS2
-        {
-            rgb_pub_->publish(*cv_image.toImageMsg());
-            if (m_undistort_map_init_success) {
-                undistort_rgb_pub_->publish(*cv_undistorted_image.toImageMsg());
-            }
-
-            // original jpeg - always publish as it's small
-            sensor_msgs::msg::CompressedImage jpeg_msg;
-            jpeg_msg.header.stamp = make_aligned_stamp(stream->imageList[0].timestamp, node_);
-            jpeg_msg.format = "jpeg";
-            jpeg_msg.data = jpeg_data;
-
-            compressed_rgb_pub_->publish(jpeg_msg);
-        }
-        #else
-        {
-            rgb_pub_.publish(cv_image.toImageMsg());
-            if (m_undistort_map_init_success) {
-                undistort_rgb_pub_.publish(cv_undistorted_image.toImageMsg());
-            }
-
-            // original jpeg
-            sensor_msgs::CompressedImagePtr jpeg_msg(new sensor_msgs::CompressedImage());
-            jpeg_msg->header.stamp = make_aligned_stamp(stream->imageList[0].timestamp);
-            jpeg_msg->format = "jpeg";
-            jpeg_msg->data = jpeg_data;
-
-            compressed_rgb_pub_.publish(jpeg_msg);
-        }
-        #endif
+        return;
     }
 
+    std::vector<uint8_t> jpeg_data(static_cast<uint8_t*>(image.pAddr),
+                                   static_cast<uint8_t*>(image.pAddr) + image.length);
+
+    if (data_logger_) {
+        const uint32_t idx_now = image_index_.fetch_add(1, std::memory_order_relaxed);
+        const double ts_sec = static_cast<double>(image.timestamp) / 1e9;
+        const uint32_t jpeg_size = static_cast<uint32_t>(jpeg_data.size());
+        std::vector<uint8_t> blob;
+        blob.reserve(sizeof(uint32_t) + sizeof(double) + sizeof(uint32_t) + jpeg_size);
+        auto append_pod = [&](const auto& value) {
+            const uint8_t* data = reinterpret_cast<const uint8_t*>(&value);
+            blob.insert(blob.end(), data, data + sizeof(value));
+        };
+        append_pod(idx_now);
+        append_pod(ts_sec);
+        append_pod(jpeg_size);
+        blob.insert(blob.end(), jpeg_data.begin(), jpeg_data.end());
+        data_logger_->enqueueImageFrame(std::move(blob));
+    }
+
+    if (g_sendrgb_compressed) {
+#ifdef ROS2
+        sensor_msgs::msg::CompressedImage jpeg_msg;
+        jpeg_msg.header.stamp = make_aligned_stamp(image.timestamp, node_);
+        jpeg_msg.format = "jpeg";
+        jpeg_msg.data = jpeg_data;
+        compressed_rgb_pub_->publish(jpeg_msg);
+#else
+        sensor_msgs::CompressedImagePtr jpeg_msg(new sensor_msgs::CompressedImage());
+        jpeg_msg->header.stamp = make_aligned_stamp(image.timestamp);
+        jpeg_msg->format = "jpeg";
+        jpeg_msg->data = jpeg_data;
+        compressed_rgb_pub_.publish(jpeg_msg);
+#endif
+    }
+
+    if (!g_sendrgb && !g_sendrgb_undistort && !g_sendcloudrender) {
+        return;
+    }
+
+    cv::Mat decoded_image = cv::imdecode(jpeg_data, cv::IMREAD_COLOR);
+    if (decoded_image.empty()) {
+#ifdef ROS2
+        RCLCPP_WARN(rclcpp::get_logger("publishRgb"), "Failed to decode RGB JPEG frame");
+#else
+        ROS_WARN("Failed to decode RGB JPEG frame");
+#endif
+        return;
+    }
+
+    cv_bridge::CvImage cv_image;
+#ifdef ROS2
+    cv_image.header.stamp = make_aligned_stamp(image.timestamp, node_);
+#else
+    cv_image.header.stamp = make_aligned_stamp(image.timestamp);
+#endif
+    cv_image.encoding = "bgr8";
+    cv_image.image = decoded_image;
+
+    if (g_sendcloudrender) {
+        std::lock_guard<std::mutex> lock(rgb_queue_mutex_);
+        if (rgb_image_queue_.size() >= 10) {
+            rgb_image_queue_.pop_front();
+        }
+        rgb_image_queue_.push_back(cv_image.toImageMsg());
+    }
+
+    if (g_sendrgb) {
+#ifdef ROS2
+        rgb_pub_->publish(*cv_image.toImageMsg());
+#else
+        rgb_pub_.publish(cv_image.toImageMsg());
+#endif
+    }
+
+    if (g_sendrgb_undistort && m_undistort_map_init_success) {
+        cv::Mat undistorted_image(decoded_image.size(), decoded_image.type());
+#ifdef ODIN_ENABLE_CUDA
+        std::string gpu_remap_error;
+        const bool gpu_remap_ok = odin_cuda::remapBgr(
+            decoded_image.ptr<uint8_t>(), decoded_image.cols, decoded_image.rows,
+            decoded_image.step, m_undistort_map_x.ptr<float>(),
+            m_undistort_map_y.ptr<float>(), m_undistort_map_x.step / sizeof(float),
+            undistorted_image.ptr<uint8_t>(), undistorted_image.step, gpu_remap_error);
+        if (!gpu_remap_ok) {
+            static bool cuda_remap_warning_printed = false;
+            if (!cuda_remap_warning_printed) {
+#ifdef ROS2
+                RCLCPP_WARN(rclcpp::get_logger("publishRgb"),
+                            "CUDA image remap unavailable, using CPU fallback: %s",
+                            gpu_remap_error.c_str());
+#else
+                ROS_WARN("CUDA image remap unavailable, using CPU fallback: %s", gpu_remap_error.c_str());
+#endif
+                cuda_remap_warning_printed = true;
+            }
+            cv::remap(decoded_image, undistorted_image, m_undistort_map_x,
+                      m_undistort_map_y, cv::INTER_LINEAR);
+        }
+#else
+        cv::remap(decoded_image, undistorted_image, m_undistort_map_x,
+                  m_undistort_map_y, cv::INTER_LINEAR);
+#endif
+
+        cv_bridge::CvImage cv_undistorted_image;
+        cv_undistorted_image.header = cv_image.header;
+        cv_undistorted_image.encoding = "bgr8";
+        cv_undistorted_image.image = undistorted_image;
+#ifdef ROS2
+        undistort_rgb_pub_->publish(*cv_undistorted_image.toImageMsg());
+#else
+        undistort_rgb_pub_.publish(cv_undistorted_image.toImageMsg());
+#endif
+    }
 }
 
 
@@ -1176,7 +1259,8 @@ void publishRgb(capture_Image_List_t *stream) {
 #endif
     }
 
-    void publishOdometry(capture_Image_List_t* stream, OdometryType odom_type, bool show_path, bool show_camerapose) {
+    void publishOdometry(capture_Image_List_t* stream, OdometryType odom_type, bool show_path,
+                         bool show_camerapose, bool publish_topic = true) {
         
 #ifdef ROS2
             auto msg = nav_msgs::msg::Odometry();
@@ -1286,7 +1370,9 @@ void publishRgb(capture_Image_List_t *stream) {
                         transformStamped.transform.rotation.w = msg.pose.pose.orientation.w;
                         tf_broadcaster->sendTransform(transformStamped);
                     }
-                    odom_publisher_->publish(msg);
+                    if (publish_topic) {
+                        odom_publisher_->publish(msg);
+                    }
 
                     // Publish odom trajectory as visualization markers (green lines connecting adjacent points)
                     static visualization_msgs::msg::Marker marker;
@@ -1382,7 +1468,9 @@ void publishRgb(capture_Image_List_t *stream) {
                         transformStamped.transform.rotation.w = msg.pose.pose.orientation.w;
                         tf_broadcaster->sendTransform(transformStamped);
                     }
-                    odom_publisher_.publish(msg);
+                    if (publish_topic) {
+                        odom_publisher_.publish(msg);
+                    }
 
                     if (show_path) {
                         // Publish odom trajectory as visualization markers (green lines connecting adjacent points)
@@ -1669,8 +1757,8 @@ private:
                                     .reliability(RMW_QOS_POLICY_RELIABILITY_RELIABLE)
                                     .durability(RMW_QOS_POLICY_DURABILITY_VOLATILE);
 
-            // Large sensor data with larger queue to avoid blocking
-            auto qos_sensor = rclcpp::QoS(10)
+            // Real-time sensor streams should drop stale frames instead of accumulating them.
+            auto qos_sensor = rclcpp::QoS(1)
                                     .reliability(RMW_QOS_POLICY_RELIABILITY_RELIABLE)
                                     .durability(RMW_QOS_POLICY_DURABILITY_VOLATILE);
 
@@ -1692,19 +1780,19 @@ private:
     }
     #ifdef ROS1
         void initialize_publishers(ros::NodeHandle& nh) {
-            imu_pub_ = nh.advertise<ros::Imu>("odin1/imu", 4000);
-            rgb_pub_ = nh.advertise<ros::Image>("odin1/image", 100);
-            cloud_pub_ = nh.advertise<ros::PointCloud2>("odin1/cloud_raw", 100);
-            xyzrgbacloud_pub_ = nh.advertise<ros::PointCloud2>("odin1/cloud_slam", 100);
-            odom_publisher_ = nh.advertise<ros::Odometry>("odin1/odometry", 100);
-            odom_highfreq_publisher_ = nh.advertise<ros::Odometry>("odin1/odometry_highfreq", 4000);
-            path_publisher_ = nh.advertise<visualization_msgs::MarkerArray>("odin1/path", 100);
-            pub_camera_pose_visual_ = nh.advertise<visualization_msgs::MarkerArray>("odin1/camera_pose_visual", 100);
-            rgbcloud_pub_ = nh.advertise<sensor_msgs::PointCloud2>("odin1/cloud_render", 100);
-            compressed_rgb_pub_ = nh.advertise<sensor_msgs::CompressedImage>("odin1/image/compressed", 100);
-            undistort_rgb_pub_ = nh.advertise<sensor_msgs::Image>("odin1/image/undistorted", 100);
-            intensity_gray_pub_ = nh.advertise<sensor_msgs::Image>("odin1/image/intensity_gray", 100);
-            wiwc_publisher_ = nh.advertise<ros::Odometry>("odin1/wiwc", 100);
+            imu_pub_ = nh.advertise<ros::Imu>("odin1/imu", 100);
+            rgb_pub_ = nh.advertise<ros::Image>("odin1/image", 1);
+            cloud_pub_ = nh.advertise<ros::PointCloud2>("odin1/cloud_raw", 1);
+            xyzrgbacloud_pub_ = nh.advertise<ros::PointCloud2>("odin1/cloud_slam", 1);
+            odom_publisher_ = nh.advertise<ros::Odometry>("odin1/odometry", 10);
+            odom_highfreq_publisher_ = nh.advertise<ros::Odometry>("odin1/odometry_highfreq", 100);
+            path_publisher_ = nh.advertise<visualization_msgs::MarkerArray>("odin1/path", 1);
+            pub_camera_pose_visual_ = nh.advertise<visualization_msgs::MarkerArray>("odin1/camera_pose_visual", 1);
+            rgbcloud_pub_ = nh.advertise<sensor_msgs::PointCloud2>("odin1/cloud_render", 1);
+            compressed_rgb_pub_ = nh.advertise<sensor_msgs::CompressedImage>("odin1/image/compressed", 1);
+            undistort_rgb_pub_ = nh.advertise<sensor_msgs::Image>("odin1/image/undistorted", 1);
+            intensity_gray_pub_ = nh.advertise<sensor_msgs::Image>("odin1/image/intensity_gray", 1);
+            wiwc_publisher_ = nh.advertise<ros::Odometry>("odin1/wiwc", 10);
             tf_broadcaster = std::make_unique<tf2_ros::TransformBroadcaster>();
         }
     #endif

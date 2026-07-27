@@ -31,7 +31,6 @@ limitations under the License.
 #include <cstring>
 #include <sys/types.h>
 #include <sys/wait.h>
-#include <signal.h>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -58,10 +57,8 @@ limitations under the License.
 static device_handle odinDevice = nullptr;
 static std::atomic<bool> deviceConnected(false);
 static std::atomic<bool> deviceDisconnected(false);  // Device disconnection flag
-static std::mutex device_mutex;                      // Device operation mutex lock
 static std::atomic<bool> g_connection_timeout(false);
 static std::atomic<bool> g_usb_version_error(false);
-static std::atomic<bool> g_shutdown_requested(false);  // Signal handler flag
 #ifdef ROS2
     std::shared_ptr<MultiSensorPublisher> g_ros_object = nullptr;
 #else
@@ -167,6 +164,9 @@ typedef struct  {
 } fpsHandle;
 
 void update_count(fpsHandle* handle) {
+    if (!g_show_fps && !g_devstatus_log) {
+        return;
+    }
     struct timespec now;
     std::lock_guard<std::mutex> lock(handle->fps_mutex);
     clock_gettime(CLOCK_MONOTONIC, &now);
@@ -176,6 +176,11 @@ void update_count(fpsHandle* handle) {
         handle->last = now;
     }
     handle->count++;
+}
+
+static bool rgb_stream_required() {
+    return g_sendrgb || g_sendrgb_compressed || g_sendrgb_undistort ||
+           g_sendcloudrender || g_record_data;
 }
 
 double cal_fps(fpsHandle* handle, const char* name, bool print = false) 
@@ -291,84 +296,6 @@ void collect_children(pid_t pid, std::vector<pid_t>& all) {
 void clear_all_queues();
 
 static bool convert_calib_to_cam_in_ex(const std::string& calib_path, const std::filesystem::path& out_path);
-
-// Signal handler for Ctrl+C
-static void signal_handler(int signum) {
-    if (signum == SIGINT || signum == SIGTERM) {
-        #ifdef ROS2
-            RCLCPP_INFO(rclcpp::get_logger("signal_handler"), "Received signal %d, shutting down...", signum);
-        #else
-            ROS_INFO("Received signal %d, shutting down...", signum);
-        #endif
-
-        g_shutdown_requested = true;
-
-        // Stop custom parameter monitoring thread
-        g_param_monitor_running = false;
-        if (g_param_monitor_thread.joinable()) {
-            g_param_monitor_thread.join();
-        }
-
-        // Close device
-        if (odinDevice) {
-            // Convert calib.yaml to cam_in_ex.txt at program end
-            if (g_ros_object) {
-                const std::filesystem::path out_path = g_ros_object->get_root_dir() / "image" / "cam_in_ex.txt";
-                (void)convert_calib_to_cam_in_ex(calib_file_, out_path);
-
-                #ifdef ROS2
-                    RCLCPP_INFO(rclcpp::get_logger("device_cb"), "pose_index: %d", g_ros_object->get_pose_index());
-                    RCLCPP_INFO(rclcpp::get_logger("device_cb"), "cloud_index: %d", g_ros_object->get_cloud_index());
-                    RCLCPP_INFO(rclcpp::get_logger("device_cb"), "image_index: %d", g_ros_object->get_image_index());
-                #else
-                    ROS_INFO("pose_index: %d", g_ros_object->get_pose_index());
-                    ROS_INFO("cloud_index: %d", g_ros_object->get_cloud_index());
-                    ROS_INFO("image_index: %d", g_ros_object->get_image_index());
-                #endif
-            }
-
-            #ifdef ROS2
-                RCLCPP_INFO(rclcpp::get_logger("signal_handler"), "Closing device...");
-            #else
-                ROS_INFO("Closing device...");
-            #endif
-
-            if (lidar_stop_stream(odinDevice, LIDAR_MODE_SLAM))
-            {
-                #ifdef ROS2
-                    RCLCPP_INFO(rclcpp::get_logger("device_cb"), "lidar_stop_stream failed");
-                #else
-                    ROS_INFO("lidar_stop_stream failed");
-                #endif
-            }
-            odinDevice = nullptr;
-        }
-
-        // Deinitialize lidar system
-        #ifdef ROS2
-            RCLCPP_INFO(rclcpp::get_logger("signal_handler"), "Deinitializing lidar system...");
-        #else
-            ROS_INFO("Deinitializing lidar system...");
-        #endif
-        lidar_system_deinit();
-
-        // Close CSV file
-        if (dev_status_csv_file) {
-            std::fflush(dev_status_csv_file);
-            fclose(dev_status_csv_file);
-            dev_status_csv_file = nullptr;
-        }
-
-        // Shutdown ROS
-        #ifdef ROS2
-            rclcpp::shutdown();
-        #else
-            ros::shutdown();
-        #endif
-
-        exit(0);
-    }
-}
 
 // Custom parameter monitoring function
 static void custom_parameter_monitor() {
@@ -901,17 +828,12 @@ static void lidar_data_callback(const lidar_data_t *data, void *user_data)
     imu_convert_data_t *imudata = nullptr;
     lidar_device_status_t *dev_info_data;
     
-    pid_t self = getpid();
-    std::vector<pid_t> pids;
-
-    double total_mb = 0.0;
-
     switch(data->type) {
         case LIDAR_DT_NONE:
             printf("empty lidar data type: %x\n", data->type);
             break;
         case LIDAR_DT_RAW_RGB:
-            if (g_sendrgb) {
+            if (rgb_stream_required()) {
                 g_ros_object->publishRgb((capture_Image_List_t *)&data->stream);
             }
             update_count(&rgb_rx_fps);
@@ -947,18 +869,22 @@ static void lidar_data_callback(const lidar_data_t *data, void *user_data)
             update_count(&slam_cloud_rx_fps);
             break;
         case LIDAR_DT_SLAM_ODOMETRY:
-            if (g_sendodom) {
-                g_ros_object->publishOdometry((capture_Image_List_t *)&data->stream, OdometryType::STANDARD, g_show_path, g_show_camerapose);
+            if (g_sendodom || g_send_odom_baselink_tf) {
+                g_ros_object->publishOdometry((capture_Image_List_t *)&data->stream, OdometryType::STANDARD,
+                                              g_show_path, g_show_camerapose, g_sendodom);
             }
             update_count(&slam_odom_rx_fps);
             break;
-        case LIDAR_DT_DEV_STATUS:
+        case LIDAR_DT_DEV_STATUS: {
             dev_info_data = (lidar_device_status_t *)data->stream.imageList[0].pAddr;
 
-            pids.push_back(self);
-            collect_children(self, pids);
-            for (pid_t p : pids) {
-                total_mb += read_pss_mb(p); // read_rss_mb(p);
+            double total_mb = 0.0;
+            if (g_devstatus_log || g_show_fps) {
+                std::vector<pid_t> pids{getpid()};
+                collect_children(getpid(), pids);
+                for (pid_t p : pids) {
+                    total_mb += read_pss_mb(p); // read_rss_mb(p);
+                }
             }
 
             if (g_devstatus_log) {
@@ -1101,6 +1027,7 @@ static void lidar_data_callback(const lidar_data_t *data, void *user_data)
                 printf("\n------------------------------------------\n");
             }
             break;
+        }
             case LIDAR_DT_SLAM_ODOMETRY_HIGHFREQ:
             {
                 if (g_sendodom) {
@@ -1126,8 +1053,9 @@ static void lidar_data_callback(const lidar_data_t *data, void *user_data)
             break;
             case LIDAR_DT_SLAM_WIWC:
             {
-                // Always publish WIWC data for real-time extrinsics
-                g_ros_object->publishWiwc((capture_Image_List_t *)&data->stream);
+                if (g_sendodom) {
+                    g_ros_object->publishWiwc((capture_Image_List_t *)&data->stream);
+                }
                 
                 if(g_record_data ) {
                     g_ros_object->recordrotate((capture_Image_List_t *)&data->stream);
@@ -1201,7 +1129,6 @@ static void lidar_device_callback(const lidar_device_info_t* device, bool attach
             #endif
 
             g_usb_version_error = true;
-            system("pkill -f rviz");
             exit(1);
             return;
         }
@@ -1247,7 +1174,7 @@ static void lidar_device_callback(const lidar_device_info_t* device, bool attach
         #endif
 
         std::filesystem::path per_con_log_root_dir;
-        {
+        if (g_devstatus_log || g_save_log) {
             auto connection_time = std::chrono::system_clock::now();
             std::time_t t = std::chrono::system_clock::to_time_t(connection_time);
             std::tm tm{};
@@ -1307,8 +1234,6 @@ static void lidar_device_callback(const lidar_device_info_t* device, bool attach
             #else
                 ROS_ERROR("Failed to get device firmware version, potential incompatible, please upgrade device firmware and retry.");
             #endif
-            system("pkill -f rviz");
-            system("pkill -f host_sdk_sample");
             exit(1);
         }
         else {
@@ -1336,8 +1261,6 @@ static void lidar_device_callback(const lidar_device_info_t* device, bool attach
                 #else
                     ROS_ERROR("The soc version is too low, please upgrade the device firmware to at least %d.%d.%d\n",required_firmware_version_major,required_firmware_version_minor,required_firmware_version_patch);
                 #endif
-                system("pkill -f rviz");
-                system("pkill -f host_sdk_sample");
                 exit(1);
             }
         }
@@ -1392,7 +1315,6 @@ static void lidar_device_callback(const lidar_device_info_t* device, bool attach
                 #else
                     ROS_WARN("Device state: streaming, this should not happen, exitting...");
                 #endif
-                system("pkill -f rviz");
                 exit(1);
                 break;
             case LIDAR_DEVICE_STREAM_STOPPED:
@@ -1428,7 +1350,20 @@ static void lidar_device_callback(const lidar_device_info_t* device, bool attach
         
         std::string calib_config = config_dir + "/calib.yaml";
         calib_file_ = calib_config;
-        if (get_calib_file) {
+        bool calibration_loaded = false;
+        if (std::filesystem::exists(calib_config)) {
+            g_renderer = std::make_shared<rawCloudRender>();
+            calibration_loaded = g_renderer->init(calib_config);
+            if (calibration_loaded) {
+                #ifdef ROS2
+                    RCLCPP_INFO(rclcpp::get_logger("device_cb"), "Using existing calibration file");
+                #else
+                    ROS_INFO("Using existing calibration file");
+                #endif
+            }
+        }
+
+        if (get_calib_file && !calibration_loaded) {
             if (lidar_get_calib_file(odinDevice, config_dir.c_str())) {
                 #ifdef ROS2
                     RCLCPP_ERROR(rclcpp::get_logger("device_cb"), "Failed to get calibration file");
@@ -1446,7 +1381,7 @@ static void lidar_device_callback(const lidar_device_info_t* device, bool attach
             #else
                 ROS_INFO("Successfully retrieved calibration files");
             #endif
-        } else {
+        } else if (!calibration_loaded) {
             #ifdef ROS2
                 RCLCPP_INFO(rclcpp::get_logger("device_cb"), "Skipping calibration retrieval for current device state");
             #else
@@ -1454,26 +1389,22 @@ static void lidar_device_callback(const lidar_device_info_t* device, bool attach
             #endif
         }
         
-        if (std::filesystem::exists(calib_config)) {
+        if (!calibration_loaded && std::filesystem::exists(calib_config)) {
             g_renderer = std::make_shared<rawCloudRender>();
-            if (g_renderer->init(calib_config)) {
+            calibration_loaded = g_renderer->init(calib_config);
+        }
+
+        if (calibration_loaded) {
             #ifdef ROS2
-                    RCLCPP_INFO(rclcpp::get_logger("device_cb"), "Point cloud renderer initialized");
+                RCLCPP_INFO(rclcpp::get_logger("device_cb"), "Point cloud renderer initialized");
             #else
-                    ROS_INFO("Point cloud renderer initialized");
+                ROS_INFO("Point cloud renderer initialized");
             #endif
-            } else {
-            #ifdef ROS2
-                    RCLCPP_ERROR(rclcpp::get_logger("device_cb"), "Failed to initialize point cloud renderer");
-            #else
-                    ROS_ERROR("Failed to initialize point cloud renderer");
-            #endif
-                }
         } else {
             #ifdef ROS2
-                    RCLCPP_WARN(rclcpp::get_logger("device_cb"), "Renderer config file not found: %s", calib_config.c_str());
+                RCLCPP_ERROR(rclcpp::get_logger("device_cb"), "Failed to initialize point cloud renderer");
             #else
-                    ROS_WARN("Renderer config file not found: %s", calib_config.c_str());
+                ROS_ERROR("Failed to initialize point cloud renderer");
             #endif
         }
         
@@ -1643,31 +1574,31 @@ static void lidar_device_callback(const lidar_device_info_t* device, bool attach
             return;
         }
         
-        std::string dev_status_csv_file_path_ = per_con_log_root_dir / "dev_status.csv";
-
         if (dev_status_csv_file) {
             std::fflush(dev_status_csv_file);
             fclose(dev_status_csv_file);
             dev_status_csv_file = nullptr;
         }
 
-        // Open the file in append mode
-        dev_status_csv_file = fopen(dev_status_csv_file_path_.c_str(), "a");
-        if (!dev_status_csv_file) {
-            #ifdef ROS2
-                RCLCPP_ERROR(rclcpp::get_logger("init"), "Failed to open dev_status CSV file");
-            #else
-                ROS_ERROR("Failed to open dev_status CSV file");
-            #endif
-        } else {
-            const char* header =
-            "uptime_seconds,package_temp,cpu_temp,center_temp,gpu_temp,npu_temp,dtof_tx_temp,dtof_rx_temp,"
-            "cpu0,cpu1,cpu2,cpu3,cpu4,cpu5,cpu6,cpu7,ram_use(%),"
-            "rgb_configured_odr,rgb_tx_odr,rgb_rx_odr,dtof_configured_odr,dtof_tx_odr,dtof_rx_odr,imu_configured_odr,imu_tx_odr,imu_rx_odr,"
-            "slam_cloud_tx_odr,slam_cloud_rx_odr,slam_odom_tx_odr,slam_odom_rx_odr,slam_odom_highfreq_tx_odr,slam_odom_highfreq_rx_odr,"
-            "host_ram_use(mb)\n";
-            fprintf(dev_status_csv_file, "%s", header);
-            std::fflush(dev_status_csv_file);
+        if (g_devstatus_log) {
+            std::string dev_status_csv_file_path_ = per_con_log_root_dir / "dev_status.csv";
+            dev_status_csv_file = fopen(dev_status_csv_file_path_.c_str(), "a");
+            if (!dev_status_csv_file) {
+                #ifdef ROS2
+                    RCLCPP_ERROR(rclcpp::get_logger("init"), "Failed to open dev_status CSV file");
+                #else
+                    ROS_ERROR("Failed to open dev_status CSV file");
+                #endif
+            } else {
+                const char* header =
+                "uptime_seconds,package_temp,cpu_temp,center_temp,gpu_temp,npu_temp,dtof_tx_temp,dtof_rx_temp,"
+                "cpu0,cpu1,cpu2,cpu3,cpu4,cpu5,cpu6,cpu7,ram_use(%),"
+                "rgb_configured_odr,rgb_tx_odr,rgb_rx_odr,dtof_configured_odr,dtof_tx_odr,dtof_rx_odr,imu_configured_odr,imu_tx_odr,imu_rx_odr,"
+                "slam_cloud_tx_odr,slam_cloud_rx_odr,slam_odom_tx_odr,slam_odom_rx_odr,slam_odom_highfreq_tx_odr,slam_odom_highfreq_rx_odr,"
+                "host_ram_use(mb)\n";
+                fprintf(dev_status_csv_file, "%s", header);
+                std::fflush(dev_status_csv_file);
+            }
         }
 
         uint32_t dtof_subframe_odr = 0;
@@ -1687,13 +1618,13 @@ static void lidar_device_callback(const lidar_device_info_t* device, bool attach
             g_rosNodeControlImpl.setDtofSubframeODR(dtof_subframe_odr);
         }
         
-        if (g_sendrgb) {
+        if (rgb_stream_required()) {
             lidar_activate_stream_type(odinDevice, LIDAR_DT_RAW_RGB);
         }
         if (g_sendimu) {
             lidar_activate_stream_type(odinDevice, LIDAR_DT_RAW_IMU);
         }
-        if (g_sendodom) {
+        if (g_sendodom || g_send_odom_baselink_tf) {
             lidar_activate_stream_type(odinDevice, LIDAR_DT_SLAM_ODOMETRY);
         }
         if (g_senddtof) {
@@ -1707,8 +1638,9 @@ static void lidar_device_callback(const lidar_device_info_t* device, bool attach
         deviceConnected = true;
         deviceDisconnected = false;
         
-        // Start IMU dedicated thread
-        start_imu_thread();
+        if (g_sendimu) {
+            start_imu_thread();
+        }
         
         // Start custom parameter monitoring thread
         g_param_monitor_running = true;
@@ -1783,10 +1715,6 @@ int main(int argc, char *argv[])
     g_ros_object = new MultiSensorPublisher(nh);
 #endif
 
-    // Register signal handlers for Ctrl+C
-    signal(SIGINT, signal_handler);
-    signal(SIGTERM, signal_handler);
-
     try {
     #ifdef ROS2
         std::string package_path = get_package_source_directory();
@@ -1852,9 +1780,7 @@ int main(int argc, char *argv[])
         g_use_host_ros_time = get_key_value("use_host_ros_time", 0);
         g_save_log = get_key_value("save_log", 0);
 
-        if (g_send_odom_baselink_tf) {
-            g_rosNodeControlImpl.setSendOdomBaseLinkTF(true);
-        }
+        g_rosNodeControlImpl.setSendOdomBaseLinkTF(g_send_odom_baselink_tf != 0);
 
         auto get_key_str_value = [&](const std::string& key, const std::string& default_value) -> std::string {
             auto it = keys_w_str_val.find(key);
@@ -2091,10 +2017,20 @@ int main(int argc, char *argv[])
         ros::shutdown();
     #endif
 
+    deviceConnected = false;
+
+    // Stop application threads before releasing resources used by SDK callbacks.
+    g_param_monitor_running = false;
+    if (g_param_monitor_thread.joinable()) {
+        g_param_monitor_thread.join();
+    }
+    stop_imu_thread();
+    clear_all_queues();
+
     // Cleanup on normal program exit
     if (odinDevice) {
         // Convert calib.yaml to cam_in_ex.txt at program end
-        if (g_ros_object) {
+        if (g_record_data && g_ros_object) {
             const std::filesystem::path out_path = g_ros_object->get_root_dir() / "image" / "cam_in_ex.txt";
             (void)convert_calib_to_cam_in_ex(calib_file_, out_path);
         }
@@ -2107,26 +2043,31 @@ int main(int argc, char *argv[])
             ROS_INFO("cloud_index: %d", g_ros_object->get_cloud_index());
             ROS_INFO("image_index: %d", g_ros_object->get_image_index());
         #endif
-        // Perform cleanup on normal exit
-        // if(lidar_stop_stream(odinDevice, LIDAR_MODE_SLAM))
-        // {
-        //     #ifdef ROS2
-        //         RCLCPP_INFO(rclcpp::get_logger("device_cb"), "lidar_stop_stream failed");
-        //     #else
-        //         ROS_INFO("lidar_stop_stream failed");
-        //     #endif
-        // }
-        
-        if(lidar_unregister_stream_callback(odinDevice))
-        {
+        #ifdef ROS2
+            RCLCPP_INFO(rclcpp::get_logger("device_cb"), "Stopping lidar stream...");
+        #else
+            ROS_INFO("Stopping lidar stream...");
+        #endif
+        if (lidar_stop_stream(odinDevice, LIDAR_MODE_SLAM)) {
             #ifdef ROS2
-                RCLCPP_INFO(rclcpp::get_logger("device_cb"), "lidar_unregister_stream_callback failed");
+                RCLCPP_WARN(rclcpp::get_logger("device_cb"), "lidar_stop_stream failed");
             #else
-                ROS_INFO("lidar_unregister_stream_callback failed");
+                ROS_WARN("lidar_stop_stream failed");
             #endif
         }
-        // lidar_close_device(odinDevice);
-        // lidar_destory_device(odinDevice);
+
+        #ifdef ROS2
+            RCLCPP_INFO(rclcpp::get_logger("device_cb"), "Unregistering stream callback...");
+        #else
+            ROS_INFO("Unregistering stream callback...");
+        #endif
+        if (lidar_unregister_stream_callback(odinDevice)) {
+            #ifdef ROS2
+                RCLCPP_WARN(rclcpp::get_logger("device_cb"), "lidar_unregister_stream_callback failed");
+            #else
+                ROS_WARN("lidar_unregister_stream_callback failed");
+            #endif
+        }
 
         if (dev_status_csv_file) {
             std::fflush(dev_status_csv_file);
@@ -2134,17 +2075,11 @@ int main(int argc, char *argv[])
             dev_status_csv_file = nullptr;
         }
     }
-    
-    // Stop custom parameter monitoring thread on exit
-    g_param_monitor_running = false;
-    if (g_param_monitor_thread.joinable()) {
-        g_param_monitor_thread.join();
-    }
-    
-    
-    // lidar_system_deinit();
 
-
-
-    return 0;
+    // The vendor SDK races its background USB threads during destroy/deinit.
+    // Streams and callbacks are already stopped; the OS releases the handle on exit.
+    std::fflush(nullptr);
+    std::cout.flush();
+    std::cerr.flush();
+    std::_Exit(EXIT_SUCCESS);
 }

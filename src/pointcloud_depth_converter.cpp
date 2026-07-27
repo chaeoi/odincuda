@@ -13,7 +13,12 @@ limitations under the License.
 
 #include "pointcloud_depth_converter.hpp"
 #include <cmath>
+#include <cstring>
 #include <iostream>
+
+#ifdef ODIN_ENABLE_CUDA
+#include "odin_cuda_ops.hpp"
+#endif
 
 PointCloudToDepthConverter::PointCloudToDepthConverter(const CameraParams &params)
     : params_(params)
@@ -102,12 +107,13 @@ void PointCloudToDepthConverter::createDistortionMaps()
 
 PointCloudToDepthConverter::ProcessResult PointCloudToDepthConverter::processCloudAndImage(
     const pcl::PointCloud<pcl::PointXYZ> &cloud,
-    const cv::Mat &image)
+    const cv::Mat &image,
+    bool generate_colored_cloud)
 {
     ProcessResult result;
     result.success = false;
 
-    auto validation_result = validateInputs(cloud, image);
+    auto validation_result = validateInputs(cloud, image, generate_colored_cloud);
     if (!validation_result.first)
     {
         result.error_message = validation_result.second;
@@ -116,6 +122,80 @@ PointCloudToDepthConverter::ProcessResult PointCloudToDepthConverter::processClo
 
     try
     {
+#ifdef ODIN_ENABLE_CUDA
+        odin_cuda::DepthParams gpu_params;
+        gpu_params.scaled_width = scaled_width_;
+        gpu_params.scaled_height = scaled_height_;
+        gpu_params.image_width = params_.image_width;
+        gpu_params.image_height = params_.image_height;
+        gpu_params.point_sampling_rate = params_.point_sampling_rate;
+        gpu_params.A11 = static_cast<float>(params_.A11);
+        gpu_params.A12 = static_cast<float>(params_.A12);
+        gpu_params.A22 = static_cast<float>(params_.A22);
+        gpu_params.u0 = static_cast<float>(params_.u0);
+        gpu_params.v0 = static_cast<float>(params_.v0);
+
+        const Eigen::Matrix4d Tlc = params_.Tcl.inverse();
+        for (int row = 0; row < 4; ++row)
+        {
+            for (int column = 0; column < 4; ++column)
+            {
+                gpu_params.Kcl[row * 4 + column] = static_cast<float>(Kcl_(row, column));
+                gpu_params.Tlc[row * 4 + column] = static_cast<float>(Tlc(row, column));
+            }
+        }
+
+        std::vector<float> gpu_colored_cloud;
+        std::string gpu_error;
+        result.depth_image.create(params_.image_height, params_.image_width, CV_32FC1);
+        const auto *cloud_data = reinterpret_cast<const float *>(cloud.points.data());
+        const std::size_t point_stride_floats = sizeof(pcl::PointXYZ) / sizeof(float);
+        if (odin_cuda::processDepth(
+                cloud_data,
+                cloud.points.size(),
+                point_stride_floats,
+                image.ptr<std::uint8_t>(),
+                image.cols,
+                image.rows,
+                image.step,
+                inv_map_x_.ptr<float>(),
+                inv_map_y_.ptr<float>(),
+                inv_map_x_.step / sizeof(float),
+                gpu_params,
+                generate_colored_cloud,
+                result.depth_image.ptr<float>(),
+                result.depth_image.total(),
+                gpu_colored_cloud,
+                gpu_error))
+        {
+            if (generate_colored_cloud)
+            {
+                result.colored_cloud.points.resize(gpu_colored_cloud.size() / 4);
+                for (std::size_t index = 0; index < result.colored_cloud.points.size(); ++index)
+                {
+                    auto &point = result.colored_cloud.points[index];
+                    point.x = gpu_colored_cloud[index * 4];
+                    point.y = gpu_colored_cloud[index * 4 + 1];
+                    point.z = gpu_colored_cloud[index * 4 + 2];
+                    point.rgb = gpu_colored_cloud[index * 4 + 3];
+                }
+                result.colored_cloud.width = result.colored_cloud.points.size();
+                result.colored_cloud.height = 1;
+                result.colored_cloud.is_dense = false;
+            }
+            result.success = true;
+            return result;
+        }
+
+        static bool cuda_warning_printed = false;
+        if (!cuda_warning_printed)
+        {
+            std::cerr << "CUDA depth pipeline unavailable, using CPU fallback: "
+                      << gpu_error << std::endl;
+            cuda_warning_printed = true;
+        }
+#endif
+
         pcl::PointCloud<pcl::PointXYZ> cloud_in_cam;
         pcl::transformPointCloud(cloud, cloud_in_cam, Kcl_);
 
@@ -123,10 +203,11 @@ PointCloudToDepthConverter::ProcessResult PointCloudToDepthConverter::processClo
 
         cv::Mat processed_depth = postProcessDepthImage(depth_img);
 
-        pcl::PointCloud<pcl::PointXYZRGB> colored_cloud = generateColoredCloud(processed_depth, image);
-
         result.depth_image = processed_depth;
-        result.colored_cloud = colored_cloud;
+        if (generate_colored_cloud)
+        {
+            result.colored_cloud = generateColoredCloud(processed_depth, image);
+        }
         result.success = true;
     }
     catch (const std::exception &e)
@@ -348,14 +429,15 @@ pcl::PointCloud<pcl::PointXYZRGB> PointCloudToDepthConverter::generateColoredClo
 }
 
 std::pair<bool, std::string> PointCloudToDepthConverter::validateInputs(
-    const pcl::PointCloud<pcl::PointXYZ> &cloud, const cv::Mat &image)
+    const pcl::PointCloud<pcl::PointXYZ> &cloud, const cv::Mat &image,
+    bool generate_colored_cloud)
 {
     if (cloud.empty())
     {
         return {false, "Empty point cloud"};
     }
 
-    if (image.empty())
+    if (generate_colored_cloud && image.empty())
     {
         return {false, "Empty image"};
     }

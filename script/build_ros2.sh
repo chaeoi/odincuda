@@ -8,12 +8,22 @@ WORKSPACE_ROOT="$(dirname "$(dirname "$PKG_DIR")")"
 WORKSPACE_SRC="${WORKSPACE_ROOT}/src"
 PROJECT_NAME="odin_ros_driver"
 PACKAGE_DIR_NAME=$(basename "$PKG_DIR")
+PACKAGE_BACKUP=""
 
 # Define color codes
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
+
+restore_package_xml() {
+    if [[ -n "$PACKAGE_BACKUP" && -f "$PACKAGE_BACKUP" ]]; then
+        cp "$PACKAGE_BACKUP" "${PKG_DIR}/package.xml"
+        rm -f "$PACKAGE_BACKUP"
+    fi
+}
+
+trap restore_package_xml EXIT INT TERM
 
 # Extract package name from package.xml
 get_package_name() {
@@ -65,8 +75,6 @@ build_workspace() {
     
     echo -e "${YELLOW}Starting ROS2 project build...${NC}"
 
-    cd $WS_DIR
-    rm -rf build install log
     # Ensure ROS2 environment is loaded
     if [ -f "/opt/ros/foxy/setup.bash" ]; then
         source "/opt/ros/foxy/setup.bash"
@@ -82,11 +90,11 @@ build_workspace() {
     # Create temporary package.xml
     if [ -f "${PKG_DIR}/package_ros2.xml" ]; then
         echo "Creating temporary package.xml (using package_ros2.xml)"
+        PACKAGE_BACKUP="$(mktemp)"
+        cp "${PKG_DIR}/package.xml" "$PACKAGE_BACKUP"
         cp "${PKG_DIR}/package_ros2.xml" "${PKG_DIR}/package.xml"
-        TEMP_PACKAGE=true
     elif [ -f "${PKG_DIR}/package.xml" ]; then
          echo "Using existing package.xml"
-        TEMP_PACKAGE=false
     else
         echo -e "${RED}Could not find package.xml in package directory${NC}"
         return 1
@@ -109,9 +117,11 @@ build_workspace() {
     # Build with correct package name
     colcon build \
         --packages-select "${PACKAGE_NAME}" \
-        --parallel-workers $(nproc) \
+        --parallel-workers "$(nproc)" \
         --cmake-args \
             -DBUILD_SYSTEM=ROS2 \
+            -DODIN_BUILD_CUDA=ON \
+            -DODIN_CUDA_ARCH=87 \
             -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
     
     BUILD_RESULT=$?
@@ -124,7 +134,8 @@ build_workspace() {
     else
         echo -e "${RED}ROS2 build failed, please check error logs${NC}"
     fi
-    
+
+    return "$BUILD_RESULT"
 }
 
 # Help function
