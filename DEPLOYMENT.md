@@ -1,7 +1,7 @@
 # 安装与使用
 
 本文记录 2026-07-27 的实际安装过程，并给出从零部署 Odin 相机 ROS 驱动的步骤。
-示例以 Jetson AGX Orin、Ubuntu 22.04、ROS2 Humble、CUDA 12.6 为主。
+示例覆盖 Jetson AGX Orin 上的 ROS1 Noetic 和 ROS2 Humble。
 
 ## 一、安装记录
 
@@ -42,6 +42,23 @@ sudo apt-get install -y --allow-downgrades \
 
 ```bash
 pkg-config --modversion opencv4
+```
+
+ROS1 Noetic + CUDA 11.4 的干净编译测试中，系统原有运行版缺少三个开发依赖。本次
+实际补装命令如下：
+
+```bash
+sudo apt-get install -y \
+  ros-noetic-nav-msgs \
+  ros-noetic-visualization-msgs \
+  ros-noetic-tf2-geometry-msgs
+```
+
+仓库的 `package.xml` 和 CMake 已补齐 ROS1 直接依赖声明，新环境也可在工作空间根目录
+使用以下命令自动安装缺失依赖：
+
+```bash
+rosdep install --from-paths src --ignore-src -r -y
 ```
 
 ## 二、部署前检查
@@ -208,12 +225,17 @@ ros2 launch odin_ros_driver odin1_ros2_gpu.launch.py \
 ROS1 Noetic 环境使用同一份源码：
 
 ```bash
+sudo apt-get update
+sudo apt-get install -y python3-rosdep libopencv-dev libpcl-dev libusb-1.0-0-dev
 mkdir -p ~/odin_gpu_ws/src
 cd ~/odin_gpu_ws/src
 git clone https://github.com/chaeoi/odincuda.git odin_ros_driver
 cd ..
 source /opt/ros/noetic/setup.bash
-catkin_make -DODIN_BUILD_CUDA=ON -DODIN_CUDA_ARCH=87
+sudo rosdep init 2>/dev/null || true
+rosdep update
+rosdep install --from-paths src --ignore-src -r -y
+catkin_make -DCMAKE_BUILD_TYPE=Release -DODIN_BUILD_CUDA=ON -DODIN_CUDA_ARCH=87
 ./devel/lib/odin_ros_driver/odin_cuda_smoke_test
 source devel/setup.bash
 roslaunch odin_ros_driver odin1_ros1_gpu.launch
@@ -285,6 +307,25 @@ cd ~/odin_gpu_ws/src/odin_ros_driver
 
 ### ROS1 + CUDA 11.4
 
-- ROS1 Noetic 的 CUDA 版本使用 `sm_87` 实际编译成功。
-- `odin_cuda_smoke_test` 连续执行两次均通过。
-- 未替换正在运行的 CPU 驱动，避免影响现有使用；正式切换时先停止 CPU 版本，再启动本项目的 GPU launch。
+- ROS1 Noetic 的 CPU 基线副本和 CUDA `sm_87` 优化版均从独立工作空间完整编译成功，
+  `odin_cuda_smoke_test` 通过。
+- 去畸变图和深度图实测均约 `10.25 Hz`；`/tf` 包含
+  `odom -> odin1_base_link`，导航节点已与该 TF 建立连接。
+- 感知节点实际连接 `/odin1/image/undistorted` 和
+  `/odin1/depth_img_competetion`，识别请求能够返回；目标内容是否有效属于下游识别，
+  不计入本次驱动验证。
+- 优化配置下连续 3 秒未收到 IMU 或里程计话题数据，确认仅保留导航需要的 TF。
+- `top` 20 秒采样结果如下，`100% CPU` 表示占满一个逻辑核：
+
+  | 场景 | 现有 CPU 部署 | CUDA 默认配置 | 降幅 |
+  | --- | ---: | ---: | ---: |
+  | 仅相机驱动栈 | `328.7%` | `68.5%` | `79.2%` |
+  | 相机 + 识别 + 导航 | `339.7%` | `107.9%` | `68.2%` |
+
+- 优化版仅相机栈中，主驱动平均 `57.9% CPU`，深度节点平均 `10.6% CPU`；100 ms
+  GPU 采样平均 `7.8%`、峰值 `39%`。
+- 以上是现有 CPU 部署配置与面向当前下游需求的 CUDA 默认配置对比，收益包含 CUDA
+  加速，以及关闭原始 RGB、IMU、SLAM 点云、渲染点云、彩色深度点云、状态 CSV、
+  重投影和图像叠加。它不是只改变 CPU/GPU 后端的单变量测试。
+- 测试全程未在原驱动工作空间内编译或启动。测试前后的原代码 HEAD、Git 差异哈希和
+  标定文件 SHA-256 均一致；停止后没有 ROS 或相机驱动进程残留。
