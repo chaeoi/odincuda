@@ -144,15 +144,23 @@ if(ROS_VERSION STREQUAL "ROS1")
         std_msgs
         sensor_msgs
         nav_msgs
+        geometry_msgs
+        visualization_msgs
         cv_bridge
-        tf
+        pcl_conversions
+        message_filters
+        tf2
+        tf2_ros
+        tf2_geometry_msgs
         image_transport
     )
     
     include_directories(${catkin_INCLUDE_DIRS})
     
     catkin_package(
-        CATKIN_DEPENDS roscpp std_msgs sensor_msgs nav_msgs cv_bridge image_transport
+        CATKIN_DEPENDS roscpp std_msgs sensor_msgs nav_msgs geometry_msgs visualization_msgs
+                       cv_bridge pcl_conversions message_filters tf2 tf2_ros tf2_geometry_msgs
+                       image_transport
         INCLUDE_DIRS include
     )
     
