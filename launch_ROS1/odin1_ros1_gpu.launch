@@ -1,0 +1,25 @@
+<launch>
+    <!-- Experimental CUDA build. Do not run beside the original Odin launch. -->
+    <arg name="node_name" default="host_sdk_sample_gpu"/>
+    <arg name="config_file" default="$(find odin_ros_driver)/config/control_command.yaml"/>
+    <arg name="enable_reprojection" default="false"/>
+    <arg name="enable_overlay" default="false"/>
+
+    <node name="$(arg node_name)" pkg="odin_ros_driver" type="host_sdk_sample_gpu" output="screen">
+        <param name="config_file" value="$(arg config_file)"/>
+    </node>
+
+    <node pkg="odin_ros_driver" type="pcd2depth_node_gpu" name="pcd2depth_node_gpu" output="screen">
+        <rosparam command="load" file="$(find odin_ros_driver)/config/control_command.yaml"/>
+        <param name="calib_file_path" value="$(find odin_ros_driver)/config/calib.yaml"/>
+    </node>
+
+    <node if="$(arg enable_reprojection)" pkg="odin_ros_driver" type="cloud_reprojection_node" name="cloud_reprojection_node_gpu_stack" output="screen">
+        <rosparam command="load" file="$(find odin_ros_driver)/config/control_command.yaml"/>
+        <param name="calib_file_path" value="$(find odin_ros_driver)/config/calib.yaml"/>
+    </node>
+
+    <node if="$(arg enable_overlay)" pkg="odin_ros_driver" type="image_overlay_node" name="image_overlay_node_gpu_stack" output="screen">
+        <rosparam command="load" file="$(find odin_ros_driver)/config/control_command.yaml"/>
+    </node>
+</launch>
