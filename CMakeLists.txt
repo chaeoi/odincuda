@@ -1,11 +1,12 @@
 cmake_minimum_required(VERSION 3.5)
 project(odin_ros_driver)
 
+
 if(DEFINED BUILD_SYSTEM)
     set(ROS_VERSION ${BUILD_SYSTEM})
     message(STATUS "ROS_VERSION: ${ROS_VERSION}")
 elseif(DEFINED ENV{ROS_DISTRO})
-    if("$ENV{ROS_DISTRO}" MATCHES "foxy|galactic|humble|iron|rolling")
+    if("$ENV{ROS_DISTRO}" MATCHES "foxy|galactic|humble|iron|jazzy|rolling")
         set(ROS_VERSION "ROS2")
     else()
         set(ROS_VERSION "ROS1")
@@ -47,18 +48,27 @@ execute_process(
     OUTPUT_STRIP_TRAILING_WHITESPACE
 )
 
-if(ARCH MATCHES "arm|aarch64")
+if(ARCH STREQUAL "x86_64")
+    set(TARGET_PLATFORM "x86")
+    message(STATUS "Detected x86_64 architecture")
+elseif(ARCH MATCHES "arm|aarch64")
     set(TARGET_PLATFORM "arm")
     message(STATUS "Detected ARM architecture: ${ARCH}")
 else()
-    message(FATAL_ERROR "Unsupported architecture: ${ARCH}. This project targets NVIDIA Jetson (aarch64).")
+    message(WARNING "Unsupported architecture: ${ARCH}. Using default settings")
+    set(TARGET_PLATFORM "unknown")
 endif()
 
 # Set library path
 set(LIB_DIR "${CMAKE_CURRENT_SOURCE_DIR}/lib")
 message(STATUS "Library directory: ${LIB_DIR}")
 
-set(LYD_HOST_API_LIB_NAME "lydHostApi_arm")
+# Set library name based on platform
+if(TARGET_PLATFORM STREQUAL "arm")
+    set(LYD_HOST_API_LIB_NAME "lydHostApi_arm")
+else()
+    set(LYD_HOST_API_LIB_NAME "lydHostApi_amd")
+endif()
 
 # Find precompiled lydHostApi library
 find_library(LYD_HOST_API_LIB
@@ -88,16 +98,17 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Set optimization flags
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O2")
-find_package(PkgConfig REQUIRED)
-find_package(OpenCV 4.5 REQUIRED)
 
+# Find common dependencies
+find_package(PkgConfig REQUIRED)
+find_package(OpenCV REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(PCL REQUIRED)
 find_package(yaml-cpp REQUIRED)
 find_package(OpenSSL REQUIRED)
 pkg_check_modules(LIBUSB REQUIRED libusb-1.0)
 
-option(ODIN_BUILD_CUDA "Build experimental CUDA-accelerated ROS1 nodes" ON)
+option(ODIN_BUILD_CUDA "Build CUDA-accelerated Odin nodes" ON)
 set(ODIN_CUDA_ARCH "87" CACHE STRING "CUDA SM architecture (87 for Jetson AGX Orin)")
 if(ODIN_BUILD_CUDA)
     find_package(CUDA 11.4 REQUIRED)
@@ -153,14 +164,29 @@ if(ROS_VERSION STREQUAL "ROS1")
         tf2_ros
         tf2_geometry_msgs
         image_transport
+        message_generation
     )
-    
+
+    # ---- AE/AWB debug services ----
+    # Declare custom .srv files; catkin generates ros1 message headers for them.
+    add_service_files(
+        FILES
+        GetAe.srv
+        GetAwb.srv
+        SetAe.srv
+        SetAwb.srv
+    )
+    generate_messages(
+        DEPENDENCIES
+        std_msgs
+    )
+
     include_directories(${catkin_INCLUDE_DIRS})
-    
+
     catkin_package(
         CATKIN_DEPENDS roscpp std_msgs sensor_msgs nav_msgs geometry_msgs visualization_msgs
                        cv_bridge pcl_conversions message_filters tf2 tf2_ros tf2_geometry_msgs
-                       image_transport
+                       image_transport message_runtime
         INCLUDE_DIRS include
     )
     
@@ -194,6 +220,9 @@ if(ROS_VERSION STREQUAL "ROS1")
         pthread
         usb-1.0
     )
+    # Make sure the AE/AWB srv headers are generated before host_sdk_sample
+    # is compiled (catkin's generate_messages produces this target).
+    add_dependencies(host_sdk_sample ${PROJECT_NAME}_generate_messages_cpp)
 
     if(ODIN_BUILD_CUDA)
         add_executable(host_sdk_sample_gpu
@@ -208,80 +237,65 @@ if(ROS_VERSION STREQUAL "ROS1")
             ${CUDA_LIBRARIES}
             ${catkin_LIBRARIES}
             ${COMMON_LIBS}
-            ${LYD_HOST_API_LIB}
-            ${LIBUSB_LIBRARIES}
             yaml-cpp
-            ${OpenCV_LIBS}
-            pthread
             usb-1.0
         )
+        add_dependencies(host_sdk_sample_gpu ${PROJECT_NAME}_generate_messages_cpp)
     endif()
 
     add_library(pointcloud_depth_converter src/pointcloud_depth_converter.cpp)
     target_link_libraries(pointcloud_depth_converter
-        ${OpenCV_LIBS}
-        ${PCL_LIBRARIES}
+    ${OpenCV_LIBS}
+    ${PCL_LIBRARIES}
     )
     add_library(depth_image_ros_node src/depth_image_ros_node.cpp)
     target_link_libraries(depth_image_ros_node
-        pointcloud_depth_converter
-        ${catkin_LIBRARIES}
-        ${OpenCV_LIBS}
-        ${PCL_LIBRARIES}
+    pointcloud_depth_converter
+    ${catkin_LIBRARIES}
+    ${OpenCV_LIBS}
+    ${PCL_LIBRARIES}
     )
     add_executable(pcd2depth_node src/pcd2depth_ros.cpp)
     target_link_libraries(pcd2depth_node
-        depth_image_ros_node
-        ${catkin_LIBRARIES}
-        ${OpenCV_LIBS}
-        ${PCL_LIBRARIES}
+    depth_image_ros_node
+    ${catkin_LIBRARIES}
+    ${OpenCV_LIBS}
+    ${PCL_LIBRARIES}
     )
 
     if(ODIN_BUILD_CUDA)
         add_library(pointcloud_depth_converter_gpu src/pointcloud_depth_converter.cpp)
         target_compile_definitions(pointcloud_depth_converter_gpu PRIVATE ODIN_ENABLE_CUDA=1)
         target_link_libraries(pointcloud_depth_converter_gpu
-            odin_cuda_ops
-            ${CUDA_LIBRARIES}
-            ${OpenCV_LIBS}
-            ${PCL_LIBRARIES}
-        )
+            odin_cuda_ops ${CUDA_LIBRARIES} ${OpenCV_LIBS} ${PCL_LIBRARIES})
 
         add_library(depth_image_ros_node_gpu src/depth_image_ros_node.cpp)
         target_link_libraries(depth_image_ros_node_gpu
-            pointcloud_depth_converter_gpu
-            ${catkin_LIBRARIES}
-            ${OpenCV_LIBS}
-            ${PCL_LIBRARIES}
-        )
+            pointcloud_depth_converter_gpu ${catkin_LIBRARIES} ${OpenCV_LIBS} ${PCL_LIBRARIES})
 
         add_executable(pcd2depth_node_gpu src/pcd2depth_ros.cpp)
         target_link_libraries(pcd2depth_node_gpu
-            depth_image_ros_node_gpu
-            ${catkin_LIBRARIES}
-            ${OpenCV_LIBS}
-            ${PCL_LIBRARIES}
-        )
+            depth_image_ros_node_gpu ${catkin_LIBRARIES} ${OpenCV_LIBS} ${PCL_LIBRARIES})
     endif()
 
     add_library(cloud_reprojector src/cloud_reprojector.cpp)
     target_link_libraries(cloud_reprojector
-        ${OpenCV_LIBS}
-        ${PCL_LIBRARIES}
+    ${OpenCV_LIBS}
+    ${PCL_LIBRARIES}
     )
 
     add_executable(cloud_reprojection_node src/cloud_reprojection_ros.cpp)
     target_link_libraries(cloud_reprojection_node
-        cloud_reprojector
-        ${catkin_LIBRARIES}
-        ${OpenCV_LIBS}
-        ${PCL_LIBRARIES}
+    cloud_reprojector
+    ${catkin_LIBRARIES}
+    ${OpenCV_LIBS}
+    ${PCL_LIBRARIES}
     )
 
     add_executable(image_overlay_node src/image_overlay_node.cpp)
     target_link_libraries(image_overlay_node
-        ${catkin_LIBRARIES}
-        ${OpenCV_LIBS}
+    ${catkin_LIBRARIES}
+    ${OpenCV_LIBS}
     )
 
     # Installation rules
@@ -289,9 +303,8 @@ if(ROS_VERSION STREQUAL "ROS1")
         RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
     )
     if(ODIN_BUILD_CUDA)
-        install(TARGETS host_sdk_sample_gpu pcd2depth_node_gpu
-            RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
-        )
+        install(TARGETS host_sdk_sample_gpu pcd2depth_node_gpu odin_cuda_smoke_test
+            RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION})
     endif()
     
     install(DIRECTORY include/
@@ -308,10 +321,9 @@ if(ROS_VERSION STREQUAL "ROS1")
 elseif(ROS_VERSION STREQUAL "ROS2")
     message(STATUS "Configuring for ROS2 build")
     
+    # Find all necessary ROS2 packages
     find_package(ament_cmake REQUIRED)
-    find_package(ament_index_cpp REQUIRED)
     find_package(rclcpp REQUIRED)
-    find_package(rcpputils REQUIRED)
     find_package(std_msgs REQUIRED)
     find_package(sensor_msgs REQUIRED)
     find_package(nav_msgs REQUIRED)
@@ -324,6 +336,19 @@ elseif(ROS_VERSION STREQUAL "ROS2")
     find_package(tf2_ros REQUIRED)
     find_package(geometry_msgs REQUIRED)
     find_package(tf2_geometry_msgs REQUIRED)
+    find_package(ament_index_cpp REQUIRED)
+    find_package(rcpputils REQUIRED)
+
+    # ---- AE/AWB debug services ----
+    # Generate C++ bindings for the 4 .srv files in srv/. The generated
+    # headers are linked into host_sdk_sample so it can host the services.
+    find_package(rosidl_default_generators REQUIRED)
+    rosidl_generate_interfaces(${PROJECT_NAME}
+        "srv/GetAe.srv"
+        "srv/GetAwb.srv"
+        "srv/SetAe.srv"
+        "srv/SetAwb.srv"
+    )
 
     if(ODIN_BUILD_CUDA)
         cuda_add_library(odin_cuda_ops STATIC src/odin_cuda_ops.cu)
@@ -333,7 +358,8 @@ elseif(ROS_VERSION STREQUAL "ROS2")
         add_executable(odin_cuda_smoke_test src/odin_cuda_smoke_test.cpp)
         target_link_libraries(odin_cuda_smoke_test odin_cuda_ops ${CUDA_LIBRARIES})
     endif()
-    
+
+    # Create executable
     add_executable(host_sdk_sample 
         src/host_sdk_sample.cpp
         src/yaml_parser.cpp  
@@ -341,12 +367,20 @@ elseif(ROS_VERSION STREQUAL "ROS2")
         src/camera_pose_visualization.cpp
         )
     
+    # Link libraries
     target_link_libraries(host_sdk_sample
         ${COMMON_LIBS}
         yaml-cpp
         usb-1.0
     )
-    
+
+    # Link the generated AE/AWB srv typesupport into host_sdk_sample so it
+    # can host the 4 debug services.
+    rosidl_get_typesupport_target(cpp_typesupport_target
+        ${PROJECT_NAME} "rosidl_typesupport_cpp")
+    target_link_libraries(host_sdk_sample "${cpp_typesupport_target}")
+
+    # Add ROS2 dependencies
     ament_target_dependencies(host_sdk_sample
         rclcpp 
         std_msgs 
@@ -371,26 +405,11 @@ elseif(ROS_VERSION STREQUAL "ROS2")
         )
         target_compile_definitions(host_sdk_sample_gpu PRIVATE ODIN_ENABLE_CUDA=1)
         target_link_libraries(host_sdk_sample_gpu
-            odin_cuda_ops
-            ${CUDA_LIBRARIES}
-            ${COMMON_LIBS}
-            yaml-cpp
-            usb-1.0
-        )
+            odin_cuda_ops ${CUDA_LIBRARIES} ${COMMON_LIBS} yaml-cpp usb-1.0
+            "${cpp_typesupport_target}")
         ament_target_dependencies(host_sdk_sample_gpu
-            rclcpp
-            std_msgs
-            sensor_msgs
-            nav_msgs
-            visualization_msgs
-            cv_bridge
-            image_transport
-            tf2
-            tf2_ros
-            geometry_msgs
-            tf2_geometry_msgs
-            ament_index_cpp
-        )
+            rclcpp std_msgs sensor_msgs nav_msgs visualization_msgs cv_bridge
+            image_transport tf2 tf2_ros geometry_msgs tf2_geometry_msgs ament_index_cpp)
     endif()
     
     add_library(pointcloud_depth_converter_ros2 src/pointcloud_depth_converter.cpp)
@@ -439,45 +458,20 @@ elseif(ROS_VERSION STREQUAL "ROS2")
         add_library(pointcloud_depth_converter_ros2_gpu src/pointcloud_depth_converter.cpp)
         target_compile_definitions(pointcloud_depth_converter_ros2_gpu PRIVATE ODIN_ENABLE_CUDA=1)
         target_link_libraries(pointcloud_depth_converter_ros2_gpu
-            odin_cuda_ops
-            ${CUDA_LIBRARIES}
-            ${OpenCV_LIBS}
-            ${PCL_LIBRARIES}
-        )
+            odin_cuda_ops ${CUDA_LIBRARIES} ${OpenCV_LIBS} ${PCL_LIBRARIES})
 
         add_library(depth_image_ros2_node_lib_gpu src/depth_image_ros2_node.cpp)
         target_link_libraries(depth_image_ros2_node_lib_gpu
-            pointcloud_depth_converter_ros2_gpu
-            ${OpenCV_LIBS}
-            ${PCL_LIBRARIES}
-        )
+            pointcloud_depth_converter_ros2_gpu ${OpenCV_LIBS} ${PCL_LIBRARIES})
         ament_target_dependencies(depth_image_ros2_node_lib_gpu
-            rclcpp
-            sensor_msgs
-            std_msgs
-            cv_bridge
-            image_transport
-            pcl_conversions
-            message_filters
-        )
+            rclcpp sensor_msgs std_msgs cv_bridge image_transport pcl_conversions message_filters)
 
         add_executable(pcd2depth_ros2_node_gpu src/pcd2depth_ros2.cpp)
         target_link_libraries(pcd2depth_ros2_node_gpu
-            depth_image_ros2_node_lib_gpu
-            ${OpenCV_LIBS}
-            ${PCL_LIBRARIES}
-            yaml-cpp
-        )
+            depth_image_ros2_node_lib_gpu ${OpenCV_LIBS} ${PCL_LIBRARIES} yaml-cpp)
         ament_target_dependencies(pcd2depth_ros2_node_gpu
-            rclcpp
-            rcpputils
-            sensor_msgs
-            std_msgs
-            cv_bridge
-            image_transport
-            pcl_conversions
-            message_filters
-        )
+            rclcpp rcpputils sensor_msgs std_msgs cv_bridge image_transport
+            pcl_conversions message_filters)
     endif()
 
     add_library(cloud_reprojector_ros2 src/cloud_reprojector.cpp)
@@ -497,7 +491,6 @@ elseif(ROS_VERSION STREQUAL "ROS2")
     )
     ament_target_dependencies(cloud_reprojection_ros2_node
         rclcpp
-        rcpputils
         sensor_msgs
         nav_msgs
         cv_bridge
@@ -519,11 +512,16 @@ elseif(ROS_VERSION STREQUAL "ROS2")
         message_filters
     )
 
+    # Installation rules - ensure all install targets are defined before ament_package()
+    # Install executable
     install(TARGETS 
         host_sdk_sample 
         pcd2depth_ros2_node
         cloud_reprojection_ros2_node
         image_overlay_node
+        depth_image_ros2_node_lib
+        pointcloud_depth_converter_ros2
+        cloud_reprojector_ros2
         EXPORT export_${PROJECT_NAME}
         ARCHIVE DESTINATION lib
         LIBRARY DESTINATION lib
@@ -534,17 +532,23 @@ elseif(ROS_VERSION STREQUAL "ROS2")
             host_sdk_sample_gpu
             pcd2depth_ros2_node_gpu
             odin_cuda_smoke_test
-            RUNTIME DESTINATION lib/${PROJECT_NAME}
-        )
+            depth_image_ros2_node_lib_gpu
+            pointcloud_depth_converter_ros2_gpu
+            ARCHIVE DESTINATION lib
+            LIBRARY DESTINATION lib
+            RUNTIME DESTINATION lib/${PROJECT_NAME})
     endif()
     
+    # Install package.xml
     install(FILES package.xml
         DESTINATION share/${PROJECT_NAME}
     )
     
+    # Install headers
     install(DIRECTORY include/
         DESTINATION include
     )
+    # Install launch_ROS2 directory
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/launch_ROS2")
         install(DIRECTORY launch_ROS2/
             DESTINATION share/${PROJECT_NAME}/launch
@@ -553,18 +557,21 @@ elseif(ROS_VERSION STREQUAL "ROS2")
     else()
         message(WARNING "launch_ROS2 directory not found")
     endif()
+    # Install config files
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/config")
         install(DIRECTORY config/
             DESTINATION share/${PROJECT_NAME}/config
         )
     endif()
     
+    # Install launch files
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/launch")
         install(DIRECTORY launch/
             DESTINATION share/${PROJECT_NAME}/launch
         )
     endif()
     ament_export_targets(export_${PROJECT_NAME})
+    # Declare dependencies
     ament_export_dependencies(
         rclcpp 
         std_msgs 
@@ -597,8 +604,7 @@ if(TARGET_PLATFORM STREQUAL "arm")
     )
     if(TARGET host_sdk_sample_gpu)
         set_target_properties(host_sdk_sample_gpu PROPERTIES
-            LINK_FLAGS "-Wl,--no-as-needed -Wl,--rpath=${LIB_DIR}"
-        )
+            LINK_FLAGS "-Wl,--no-as-needed -Wl,--rpath=${LIB_DIR}")
     endif()
     message(STATUS "Adding ARM-specific link options and RPATH")
 endif()

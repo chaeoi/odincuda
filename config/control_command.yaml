@@ -18,7 +18,7 @@ register_keys:
   sendrgb: 0              # 0: off; 1: on
 
   # undistort rgb image processed from decoded rgb data.
-  # related camera parameters can be found in ws/src/odin_ros_driver/config/calib.yaml
+  # related camera parameters are stored in ~/.ros/odin_ros_driver/calib.yaml
   # Processed on host device
   sendrgbundistort: 1    # 0: off; 1: on.
 
@@ -36,9 +36,15 @@ register_keys:
   # Odometry data
   sendodom: 0             # 0: off; 1: on
 
-  # TF from odom to base_link, required by the navigation node.
-  # This can remain enabled while sendodom is off to avoid unused odometry topics.
+  # TF from odom to imu. Leave it on unless you specifically need it off.
+  # ATTENTION: critical for rviz to show cloud_raw.
   send_odom_baselink_tf: 1 # 0: off; 1: on.
+
+  # Extra TF publish rate (Hz) for odom->imu transform.
+  # 0: disabled (TF only published with odom data, at actual rate)
+  # >0: additionally publish TF at this rate using a timer (e.g. 50 for 50Hz)
+  # Useful for ROS2 Jazzy where tf2 has strict timestamp lookup
+  tf_extra_publish_rate: 0  # 0: off; >0: rate in Hz
 
   # raw dtof data
   senddtof: 1             # 0: off; 1: on
@@ -47,8 +53,7 @@ register_keys:
   # dtof sensor frame rate. Supported values: 100 (10fps) or 145 (14.5fps)
   # Higher frame rate provides smoother point cloud data but may increase data bandwidth
   # Note: value is multiplied by 10 (e.g., 145 means 14.5fps)
-  dtof_fps: 100           # 100: 10fps; 145: 14.5fps
-
+  dtof_fps: 100           # 100: 10fps; 145: 14.5fps 290: dtof 10hz + camera 29hz(not support)
   # slam cloud data
   sendcloudslam: 0        # 0: off; 1: on
 
@@ -61,7 +66,7 @@ register_keys:
   # Processed on host device
   senddepth: 1            # 0: off; 1: on
 
-  # colored depth cloud also requires sendrgb: 1 and consumes more CPU/GPU memory
+  # colored depth cloud also requires sendrgb: 1 and consumes more resources
   senddepthcloud: 0       # 0: depth image only; 1: also publish colored depth cloud
 
   # cloud reprojection demo, projects cloud_slam to camera image using odometry
@@ -70,7 +75,11 @@ register_keys:
 
   # image overlay settings - overlays reprojected points on camera image
   # Processed on host device
-  sendoverlay: 0          # 0: off; 1: on
+  sendoverlay: 0                                    # 0: off; 1: on
+  overlay_reprojected_topic: "/odin1/reprojected_image"  # reprojected image topic
+  overlay_camera_topic: "/odin1/image/undistorted"       # camera image topic (undistorted)
+  overlay_output_topic: "/odin1/overlay_image"           # output overlay image topic
+  overlay_alpha: 0.6                                     # blend alpha (0.0-1.0, higher = more reproj color)
 
   # record rgb, odometry, and slam cloud data as proprietary olx format for further processing in MindCloud(TM) software. 
   # save path: ws/src/odin_ros_driver/recorddata/{record_start_time}/
@@ -90,6 +99,8 @@ register_keys:
   
   custom_map_mode: 0      # 0: Odometry mode 1: SLAM mode 2: Relocalization mode
   custom_init_pos: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]
+  custom_init_pose_search_radius: 4.0 # max position offset in meters, recommended <= 10
+  custom_init_pose_max_rot_deg: 180.0 # max rotation offset in degrees, up to 180
   relocalization_map_abs_path: "" # must be set for Relocalization mode or will fail
 
   # To get the mapping result file, please use the set_param.sh script provided: "./set_param.sh save_map 1"

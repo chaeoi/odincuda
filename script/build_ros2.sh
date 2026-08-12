@@ -75,13 +75,21 @@ build_workspace() {
     
     echo -e "${YELLOW}Starting ROS2 project build...${NC}"
 
-    # Ensure ROS2 environment is loaded
-    if [ -f "/opt/ros/foxy/setup.bash" ]; then
-        source "/opt/ros/foxy/setup.bash"
-    elif [ -f "/opt/ros/galactic/setup.bash" ]; then
-        source "/opt/ros/galactic/setup.bash"
-    elif [ -f "/opt/ros/humble/setup.bash" ]; then
-        source "/opt/ros/humble/setup.bash"
+    # Prefer the active ROS distribution, otherwise probe installed ROS2 releases.
+    ROS2_SETUP_BASH=""
+    if [[ -n "${ROS_DISTRO:-}" && -f "/opt/ros/${ROS_DISTRO}/setup.bash" ]]; then
+        ROS2_SETUP_BASH="/opt/ros/${ROS_DISTRO}/setup.bash"
+    else
+        for distro in rolling jazzy iron humble galactic foxy; do
+            if [[ -f "/opt/ros/${distro}/setup.bash" ]]; then
+                ROS2_SETUP_BASH="/opt/ros/${distro}/setup.bash"
+                break
+            fi
+        done
+    fi
+    if [[ -n "$ROS2_SETUP_BASH" ]]; then
+        echo -e "${GREEN}Sourcing ROS2 environment: ${ROS2_SETUP_BASH}${NC}"
+        source "$ROS2_SETUP_BASH"
     else
         echo -e "${RED}Could not find ROS2 setup.bash file. Please ensure ROS2 is installed.${NC}"
         return 1
@@ -115,9 +123,11 @@ build_workspace() {
     cd "${WORKSPACE_ROOT}" || return 1
     
     # Build with correct package name
+    export CMAKE_BUILD_PARALLEL_LEVEL="${ODIN_BUILD_JOBS:-2}"
     colcon build \
         --packages-select "${PACKAGE_NAME}" \
-        --parallel-workers "$(nproc)" \
+        --executor sequential \
+        --parallel-workers 1 \
         --cmake-args \
             -DBUILD_SYSTEM=ROS2 \
             -DODIN_BUILD_CUDA=ON \

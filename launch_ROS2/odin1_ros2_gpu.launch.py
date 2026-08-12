@@ -9,10 +9,23 @@ from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
 
+def get_odin_runtime_dir():
+    custom = os.environ.get("ODIN_CALIB_DIR")
+    if custom:
+        return custom
+    ros_home = os.environ.get("ROS_HOME")
+    if ros_home:
+        return os.path.join(ros_home, "odin_ros_driver")
+    home = os.environ.get("HOME")
+    if home:
+        return os.path.join(home, ".ros", "odin_ros_driver")
+    return "/tmp/odin_ros_driver"
+
+
 def generate_launch_description():
     package_dir = get_package_share_directory("odin_ros_driver")
     control_path = os.path.join(package_dir, "config", "control_command.yaml")
-    calib_path = os.path.join(package_dir, "config", "calib.yaml")
+    calib_path = os.path.join(get_odin_runtime_dir(), "calib.yaml")
 
     with open(control_path, "r", encoding="utf-8") as config_file:
         control_params = yaml.safe_load(config_file)
