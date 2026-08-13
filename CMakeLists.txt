@@ -88,7 +88,9 @@ else()
         message(STATUS "Found library files: ${LIB_FILES}")
         set(LYD_HOST_API_LIB ${LIB_FILES})
     else()
-        message(FATAL_ERROR "Could not find precompiled lydHostApi library in ${LIB_DIR}")
+        message(FATAL_ERROR
+            "Could not find precompiled lydHostApi library in ${LIB_DIR}. "
+            "Run ./script/download_vendor_sdk.sh before building.")
     endif()
 endif()
 

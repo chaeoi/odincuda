@@ -75,6 +75,12 @@ CSV 均默认关闭。导航所需的 TF 独立保留，不会同时发布未使
 - OpenCV：4.5 或更高版本
 - 厂商 SDK：`lib/liblydHostApi_arm.a`
 
+如果源码包未包含厂商二进制 SDK，手动构建前请在驱动包目录执行一次：
+
+```bash
+./script/download_vendor_sdk.sh
+```
+
 `calib.yaml` 是设备专属的出厂标定文件。正常部署不需要用户重新标定，也不需要在
 编译前手工放入仓库；驱动连接相机后会通过厂商 SDK 从设备读取，并保存到
 `~/.ros/odin_ros_driver/calib.yaml`。可通过 `ODIN_CALIB_DIR` 修改保存目录。
@@ -249,7 +255,7 @@ ROS1 的降幅同时来自 CUDA 加速和默认关闭未使用的原始 RGB、IM
 ## 相对官方 v0.14.0 的文件改动
 
 对比基准是官方提交 `6f993ccc4ccad9395bfc68bc3235f993d83c4fe6`。当前仓库相对该
-版本新增 9 个文件、修改 24 个文件、删除 0 个文件。
+版本新增 10 个文件、修改 25 个文件、删除 0 个文件。
 
 新增文件：
 
@@ -264,6 +270,7 @@ ROS1 的降幅同时来自 CUDA 加速和默认关闭未使用的原始 RGB、IM
 | `script/install_ros1.sh` | 新增 ROS 1 一键安装脚本，源码及本地 rosdep 快照通过 GitWarp codeload 下载。 |
 | `script/install_ros2.sh` | 新增 ROS 2 一键安装脚本，源码及本地 rosdep 快照通过 GitWarp codeload 下载。 |
 | `script/benchmark_ros2_cpu_cuda.sh` | 新增同配置 CPU/CUDA 进程 CPU、RSS、Jetson GPU A/B 采样脚本。 |
+| `script/download_vendor_sdk.sh` | 校验源码包内的 v0.14.0 厂商 SDK，并在缺失或损坏时通过 GitWarp 重新下载。 |
 
 修改文件：
 

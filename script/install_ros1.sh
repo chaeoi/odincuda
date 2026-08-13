@@ -72,6 +72,7 @@ install_source_archive() {
     curl -fL --retry 4 --retry-delay 2 "$ARCHIVE_URL" -o "$archive"
     tar -xzf "$archive" --strip-components=1 -C "$extracted"
     test -f "${extracted}/CMakeLists.txt"
+    bash "${extracted}/script/download_vendor_sdk.sh" "$extracted"
 
     if [[ -e "$PACKAGE_DIR" ]]; then
         if [[ -d "${PACKAGE_DIR}/.git" ]]; then
