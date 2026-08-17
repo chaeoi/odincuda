@@ -225,8 +225,8 @@ test "$rosdep_status" -eq 0
 这里下载的是一个 GitWarp codeload 快照。`rosdep` 在本机解析快照，避免向 Raw CDN
 连续发送大量小请求而触发 403；缓存生成后恢复标准官方源列表。
 
-本仓库默认 `package.xml` 是 ROS 1 清单。做 ROS 2 的 `rosdep install` 时临时切换，完成
-后立即恢复：
+本仓库默认 `package.xml` 是 ROS 2 清单。ROS 2 构建脚本会临时使用
+`package_ros2.xml`，完成后立即恢复：
 
 ```bash
 cd ~/odincuda/src/odin_ros_driver
@@ -253,7 +253,7 @@ export ODIN_BUILD_JOBS=2
 ```bash
 test -f ~/odincuda/install/setup.bash
 find ~/odincuda/install/odin_ros_driver/lib -maxdepth 2 -type f \
-  \( -name host_sdk_sample_gpu -o -name pcd2depth_ros2_node_gpu \
+  \( -name host_sdk_sample -o -name pcd2depth_ros2_node \
   -o -name odin_cuda_smoke_test \) -print
 ```
 
@@ -271,28 +271,29 @@ ros2 run odin_ros_driver odin_cuda_smoke_test
 必须看到 `CUDA smoke test passed`。失败时不要继续启动相机，先解决 CUDA 驱动、Toolkit
 或编译架构问题。
 
-## ROS 2 第 10 步：确认低占用配置
+## ROS 2 第 10 步：确认官方配置
 
 ```bash
 cd ~/odincuda/src/odin_ros_driver
-grep -E 'sendrgb:|sendrgbundistort:|sendimu:|sendodom:|send_odom_baselink_tf:|senddtof:|senddepth:|senddepthcloud:' \
+grep -E 'sendrgb:|sendrgbundistort:|sendimu:|sendodom:|send_odom_baselink_tf:|senddtof:|senddepth:' \
   config/control_command.yaml
 ```
 
 默认应为：
 
 ```text
-sendrgb: 0
-sendrgbundistort: 1
-sendimu: 0
-sendodom: 0
+sendrgb: 1
+sendrgbundistort: 0
+sendimu: 1
+sendodom: 1
 send_odom_baselink_tf: 1
 senddtof: 1
-senddepth: 1
-senddepthcloud: 0
+senddepth: 0
 ```
 
-需要彩色深度点云时必须同时设置 `senddepthcloud: 1` 和 `sendrgb: 1`。
+需要保存地图时先把 `custom_map_mode` 设为 `1`，再执行 `./set_param.sh save_map 1`。
+地图默认写入 `map/{driver_start_time}/map_{map_save_time}.bin`，也可以填写
+`mapping_result_dest_dir` 和 `mapping_result_file_name`。
 
 ## ROS 2 第 11 步：首次启动并读取标定
 
@@ -309,7 +310,7 @@ pgrep -af 'host_sdk_sample|pcd2depth' || true
 cd ~/odincuda
 source /opt/ros/humble/setup.bash
 source install/setup.bash
-ros2 launch odin_ros_driver odin1_ros2_gpu.launch.py
+ros2 launch odin_ros_driver odin1_ros2.launch.py
 ```
 
 首次连接的关键日志应依次包含：
@@ -343,7 +344,7 @@ ros2 node list
 ros2 topic list | sort
 ```
 
-应至少看到 GPU 主驱动、GPU 深度节点和 `/depth_image_ros2_node`，并有下列话题：
+应至少看到官方主驱动、深度节点和 `/depth_image_ros2_node`，并有下列话题：
 
 ```text
 /odin1/cloud_raw
@@ -375,14 +376,7 @@ timeout 15s ros2 topic hz /odin1/depth_img_competetion
 pgrep -af 'host_sdk_sample|pcd2depth' || true
 ```
 
-无输出后可以再次执行第 11 步启动命令。同一相机不能同时运行 CPU 和 GPU 主驱动。
-
-需要重投影或叠加图时才开启额外节点：
-
-```bash
-ros2 launch odin_ros_driver odin1_ros2_gpu.launch.py \
-  enable_reprojection:=true enable_overlay:=true
-```
+无输出后可以再次执行第 11 步启动命令。同一相机不能同时运行两个驱动进程。
 
 # ROS 1 Noetic 部署
 
@@ -542,7 +536,8 @@ source /opt/ros/noetic/setup.bash
 rosdep install --from-paths src --ignore-src -r -y --rosdistro noetic
 ```
 
-快照方案的原因和 ROS 2 相同。默认 `package.xml` 已是 ROS 1 清单，不需要手工切换。
+快照方案的原因和 ROS 2 相同。ROS 1 构建脚本会临时使用 `package_ros1.xml`，完成后
+恢复默认清单。
 
 ## ROS 1 第 8 步：编译 CUDA 版本
 
@@ -558,7 +553,7 @@ export ODIN_BUILD_JOBS=2
 ```bash
 test -f ~/odincuda/devel/setup.bash
 find ~/odincuda/devel/lib/odin_ros_driver -maxdepth 1 -type f \
-  \( -name host_sdk_sample_gpu -o -name pcd2depth_node_gpu \
+  \( -name host_sdk_sample -o -name pcd2depth_node \
   -o -name odin_cuda_smoke_test \) -print
 ```
 
@@ -573,16 +568,16 @@ source devel/setup.bash
 
 必须看到 `CUDA smoke test passed`。
 
-## ROS 1 第 10 步：确认低占用配置
+## ROS 1 第 10 步：确认官方配置
 
 ```bash
 cd ~/odincuda/src/odin_ros_driver
-grep -E 'sendrgb:|sendrgbundistort:|sendimu:|sendodom:|send_odom_baselink_tf:|senddtof:|senddepth:|senddepthcloud:' \
+grep -E 'sendrgb:|sendrgbundistort:|sendimu:|sendodom:|send_odom_baselink_tf:|senddtof:|senddepth:' \
   config/control_command.yaml
 ```
 
-预期值与 ROS 2 第 10 步相同。需要彩色深度点云时同时启用 `senddepthcloud` 和
-`sendrgb`。
+预期值与 ROS 2 第 10 步相同。保存地图时先把 `custom_map_mode` 设为 `1`，再执行
+`./set_param.sh save_map 1`。
 
 ## ROS 1 第 11 步：首次启动并读取标定
 
@@ -592,7 +587,7 @@ pgrep -af 'host_sdk_sample|pcd2depth' || true
 cd ~/odincuda
 source /opt/ros/noetic/setup.bash
 source devel/setup.bash
-roslaunch odin_ros_driver odin1_ros1_gpu.launch
+roslaunch odin_ros_driver odin1_ros1.launch
 ```
 
 首次启动应看到硬件连接、`ros_driver_version:0.14.0`、标定 MD5 成功、软件连接成功和
@@ -636,12 +631,8 @@ timeout 15s rostopic hz /odin1/depth_img_competetion
 pgrep -af 'host_sdk_sample|pcd2depth' || true
 ```
 
-需要额外后处理时才开启：
-
-```bash
-roslaunch odin_ros_driver odin1_ros1_gpu.launch \
-  enable_reprojection:=true enable_overlay:=true
-```
+启动文件会按官方配置启动重投影和叠加节点；是否发布对应话题由
+`sendreprojection`、`sendoverlay` 等官方配置键控制。
 
 # 通用故障处理
 

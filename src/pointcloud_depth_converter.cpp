@@ -107,13 +107,12 @@ void PointCloudToDepthConverter::createDistortionMaps()
 
 PointCloudToDepthConverter::ProcessResult PointCloudToDepthConverter::processCloudAndImage(
     const pcl::PointCloud<pcl::PointXYZ> &cloud,
-    const cv::Mat &image,
-    bool generate_colored_cloud)
+    const cv::Mat &image)
 {
     ProcessResult result;
     result.success = false;
 
-    auto validation_result = validateInputs(cloud, image, generate_colored_cloud);
+    auto validation_result = validateInputs(cloud, image);
     if (!validation_result.first)
     {
         result.error_message = validation_result.second;
@@ -162,27 +161,24 @@ PointCloudToDepthConverter::ProcessResult PointCloudToDepthConverter::processClo
                 inv_map_y_.ptr<float>(),
                 inv_map_x_.step / sizeof(float),
                 gpu_params,
-                generate_colored_cloud,
+                true,
                 result.depth_image.ptr<float>(),
                 result.depth_image.total(),
                 gpu_colored_cloud,
                 gpu_error))
         {
-            if (generate_colored_cloud)
+            result.colored_cloud.points.resize(gpu_colored_cloud.size() / 4);
+            for (std::size_t index = 0; index < result.colored_cloud.points.size(); ++index)
             {
-                result.colored_cloud.points.resize(gpu_colored_cloud.size() / 4);
-                for (std::size_t index = 0; index < result.colored_cloud.points.size(); ++index)
-                {
-                    auto &point = result.colored_cloud.points[index];
-                    point.x = gpu_colored_cloud[index * 4];
-                    point.y = gpu_colored_cloud[index * 4 + 1];
-                    point.z = gpu_colored_cloud[index * 4 + 2];
-                    point.rgb = gpu_colored_cloud[index * 4 + 3];
-                }
-                result.colored_cloud.width = result.colored_cloud.points.size();
-                result.colored_cloud.height = 1;
-                result.colored_cloud.is_dense = false;
+                auto &point = result.colored_cloud.points[index];
+                point.x = gpu_colored_cloud[index * 4];
+                point.y = gpu_colored_cloud[index * 4 + 1];
+                point.z = gpu_colored_cloud[index * 4 + 2];
+                point.rgb = gpu_colored_cloud[index * 4 + 3];
             }
+            result.colored_cloud.width = result.colored_cloud.points.size();
+            result.colored_cloud.height = 1;
+            result.colored_cloud.is_dense = false;
             result.success = true;
             return result;
         }
@@ -204,10 +200,7 @@ PointCloudToDepthConverter::ProcessResult PointCloudToDepthConverter::processClo
         cv::Mat processed_depth = postProcessDepthImage(depth_img);
 
         result.depth_image = processed_depth;
-        if (generate_colored_cloud)
-        {
-            result.colored_cloud = generateColoredCloud(processed_depth, image);
-        }
+        result.colored_cloud = generateColoredCloud(processed_depth, image);
         result.success = true;
     }
     catch (const std::exception &e)
@@ -429,15 +422,14 @@ pcl::PointCloud<pcl::PointXYZRGB> PointCloudToDepthConverter::generateColoredClo
 }
 
 std::pair<bool, std::string> PointCloudToDepthConverter::validateInputs(
-    const pcl::PointCloud<pcl::PointXYZ> &cloud, const cv::Mat &image,
-    bool generate_colored_cloud)
+    const pcl::PointCloud<pcl::PointXYZ> &cloud, const cv::Mat &image)
 {
     if (cloud.empty())
     {
         return {false, "Empty point cloud"};
     }
 
-    if (generate_colored_cloud && image.empty())
+    if (image.empty())
     {
         return {false, "Empty image"};
     }

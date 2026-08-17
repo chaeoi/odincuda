@@ -82,9 +82,6 @@ enum class OdometryType {
 
 
 extern int g_log_level;
-extern int g_sendrgb;
-extern int g_sendrgb_compressed;
-extern int g_sendrgb_undistort;
 extern int g_sendcloudrender;
 extern int g_use_host_ros_time;
 double get_ptp_smoothed_delay();
@@ -916,7 +913,7 @@ void publishRgb(capture_Image_List_t *stream) {
         cv::Mat undistorted_image = cv::Mat::zeros(decoded_image.size(), decoded_image.type());
         cv_bridge::CvImage cv_undistorted_image;
 
-        if (g_sendrgb_undistort && m_undistort_map_init_success) {
+        if (m_undistort_map_init_success) {
 #ifdef ODIN_ENABLE_CUDA
             std::string cuda_error;
             if (!odin_cuda::remapBgr(
@@ -953,10 +950,8 @@ void publishRgb(capture_Image_List_t *stream) {
 
         #ifdef ROS2
         {
-            if (g_sendrgb) {
-                rgb_pub_->publish(*cv_image.toImageMsg());
-            }
-            if (g_sendrgb_undistort && m_undistort_map_init_success) {
+            rgb_pub_->publish(*cv_image.toImageMsg());
+            if (m_undistort_map_init_success) {
                 undistort_rgb_pub_->publish(*cv_undistorted_image.toImageMsg());
             }
 
@@ -966,16 +961,12 @@ void publishRgb(capture_Image_List_t *stream) {
             jpeg_msg.format = "jpeg";
             jpeg_msg.data = jpeg_data;
 
-            if (g_sendrgb_compressed) {
-                compressed_rgb_pub_->publish(jpeg_msg);
-            }
+            compressed_rgb_pub_->publish(jpeg_msg);
         }
         #else
         {
-            if (g_sendrgb) {
-                rgb_pub_.publish(cv_image.toImageMsg());
-            }
-            if (g_sendrgb_undistort && m_undistort_map_init_success) {
+            rgb_pub_.publish(cv_image.toImageMsg());
+            if (m_undistort_map_init_success) {
                 undistort_rgb_pub_.publish(cv_undistorted_image.toImageMsg());
             }
 
@@ -985,9 +976,7 @@ void publishRgb(capture_Image_List_t *stream) {
             jpeg_msg->format = "jpeg";
             jpeg_msg->data = jpeg_data;
 
-            if (g_sendrgb_compressed) {
-                compressed_rgb_pub_.publish(jpeg_msg);
-            }
+            compressed_rgb_pub_.publish(jpeg_msg);
         }
         #endif
     }

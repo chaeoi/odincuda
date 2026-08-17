@@ -230,4 +230,4 @@ echo "请重新登录一次，使 plugdev 用户组生效，并物理拔插相�
 echo "启动命令："
 echo "  source /opt/ros/humble/setup.bash"
 echo "  source '$ODIN_WORKSPACE/install/setup.bash'"
-echo "  ros2 launch odin_ros_driver odin1_ros2_gpu.launch.py"
+echo "  ros2 launch odin_ros_driver odin1_ros2.launch.py"

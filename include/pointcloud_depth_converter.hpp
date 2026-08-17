@@ -51,8 +51,7 @@ public:
 
 
     ProcessResult processCloudAndImage(const pcl::PointCloud<pcl::PointXYZ> &cloud,
-                                       const cv::Mat &image,
-                                       bool generate_colored_cloud = true);
+                                       const cv::Mat &image);
 
 	cv::Mat customResize(const cv::Mat& src, const cv::Size& size);
     const CameraParams &getCameraParams() const { return params_; }
@@ -90,6 +89,5 @@ private:
 
 
     std::pair<bool, std::string> validateInputs(const pcl::PointCloud<pcl::PointXYZ> &cloud,
-                                                const cv::Mat &image,
-                                                bool generate_colored_cloud);
+                                                const cv::Mat &image);
 };

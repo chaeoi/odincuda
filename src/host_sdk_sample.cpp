@@ -170,11 +170,6 @@ FILE* dev_status_csv_file = nullptr;
 
 std::filesystem::path map_root_dir_;
 
-static bool rgb_stream_required() {
-    return g_sendrgb || g_sendrgb_compressed || g_sendrgb_undistort ||
-           g_sendcloudrender || g_record_data;
-}
-
 char driver_start_time[32];
 
 typedef struct  {
@@ -503,11 +498,54 @@ static void process_command_file() {
                 // already issues that set internally; doing it twice could re-trigger map
                 // generation on the device side after it already completed once.
                 if (param_name == "save_map" && value == 1) {
+                    if (g_custom_map_mode != 1) {
+                        #ifdef ROS2
+                            RCLCPP_ERROR(rclcpp::get_logger("command_processor"),
+                                         "Cannot save map: custom_map_mode must be 1 (SLAM mode), current mode is %d",
+                                         g_custom_map_mode);
+                        #else
+                            ROS_ERROR("Cannot save map: custom_map_mode must be 1 (SLAM mode), current mode is %d",
+                                      g_custom_map_mode);
+                        #endif
+                        return;
+                    }
+
+                    std::string map_dir = g_mapping_result_dest_dir != ""
+                        ? g_mapping_result_dest_dir : map_root_dir_.string();
+                    if (map_dir.empty()) {
+                        #ifdef ROS2
+                            RCLCPP_ERROR(rclcpp::get_logger("command_processor"),
+                                         "Cannot save map: mapping result directory is empty");
+                        #else
+                            ROS_ERROR("Cannot save map: mapping result directory is empty");
+                        #endif
+                        return;
+                    }
+
+                    std::error_code map_dir_error;
+                    std::filesystem::create_directories(map_dir, map_dir_error);
+                    std::error_code map_status_error;
+                    const bool map_dir_is_usable = std::filesystem::is_directory(map_dir, map_status_error);
+                    if (map_dir_error || map_status_error || !map_dir_is_usable) {
+                        const std::string error_message = map_dir_error
+                            ? map_dir_error.message()
+                            : map_status_error.message();
+                        #ifdef ROS2
+                            RCLCPP_ERROR(rclcpp::get_logger("command_processor"),
+                                         "Cannot save map: directory is not usable: %s (%s)",
+                                         map_dir.c_str(), error_message.c_str());
+                        #else
+                            ROS_ERROR("Cannot save map: directory is not usable: %s (%s)",
+                                      map_dir.c_str(), error_message.c_str());
+                        #endif
+                        return;
+                    }
+
                     #ifdef ROS2
                         RCLCPP_INFO(rclcpp::get_logger("command_processor"),
-                                    "Successfully set %s = %d", param_name.c_str(), value);
+                                    "Save map request accepted");
                     #else
-                        ROS_INFO("Successfully set %s = %d", param_name.c_str(), value);
+                        ROS_INFO("Save map request accepted");
                     #endif
                     {
                         auto now = std::chrono::system_clock::now();
@@ -521,7 +559,6 @@ static void process_command_file() {
                         char map_save_time[32];
                         std::strftime(map_save_time, sizeof(map_save_time), "%Y%m%d_%H%M%S", &tm);
 
-                        std::string map_dir = g_mapping_result_dest_dir != "" ? g_mapping_result_dest_dir : map_root_dir_.string();
                         std::string map_name = g_mapping_result_file_name != "" ? g_mapping_result_file_name : "map_" + std::string(map_save_time) + ".bin";
 
                         #ifdef ROS2
@@ -1003,7 +1040,7 @@ static void lidar_data_callback(const lidar_data_t *data, void *user_data)
             printf("empty lidar data type: %x\n", data->type);
             break;
         case LIDAR_DT_RAW_RGB:
-            if (rgb_stream_required()) {
+            if (g_sendrgb) {
                 g_ros_object->publishRgb((capture_Image_List_t *)&data->stream);
             }
             update_count(&rgb_rx_fps);
@@ -1893,7 +1930,7 @@ static void lidar_device_callback(const lidar_device_info_t* device, bool attach
                 g_sendrgb, g_sendimu, g_sendodom, g_senddtof, g_sendcloudslam);
         #endif
 
-        if (rgb_stream_required()) {
+        if (g_sendrgb) {
             lidar_activate_stream_type(odinDevice, LIDAR_DT_RAW_RGB);
         } else {
             lidar_deactivate_stream_type(odinDevice, LIDAR_DT_RAW_RGB);
@@ -2384,9 +2421,30 @@ int main(int argc, char *argv[])
             std::filesystem::create_directories(log_root_dir_);
         }
 
-        if (g_custom_map_mode == 1 && g_mapping_result_dest_dir == "") {
-            map_root_dir_ = std::filesystem::path(map_dir) / driver_start_time;
-            std::filesystem::create_directories(map_root_dir_);
+        if (g_custom_map_mode == 1) {
+            if (g_mapping_result_dest_dir != "") {
+                map_root_dir_ = std::filesystem::path(g_mapping_result_dest_dir);
+            } else {
+                map_root_dir_ = std::filesystem::path(map_dir) / driver_start_time;
+            }
+
+            std::error_code map_dir_error;
+            std::filesystem::create_directories(map_root_dir_, map_dir_error);
+            std::error_code map_status_error;
+            const bool map_dir_is_usable = std::filesystem::is_directory(map_root_dir_, map_status_error);
+            if (map_dir_error || map_status_error || !map_dir_is_usable) {
+                const std::string error_message = map_dir_error
+                    ? map_dir_error.message()
+                    : map_status_error.message();
+                #ifdef ROS2
+                    RCLCPP_ERROR(rclcpp::get_logger("main"),
+                                 "Failed to create map output directory %s: %s",
+                                 map_root_dir_.c_str(), error_message.c_str());
+                #else
+                    ROS_ERROR("Failed to create map output directory %s: %s",
+                              map_root_dir_.c_str(), error_message.c_str());
+                #endif
+            }
         }
 
         if (lidar_system_init(lidar_device_callback)) {
