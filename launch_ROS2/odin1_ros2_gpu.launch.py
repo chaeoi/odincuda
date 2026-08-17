@@ -4,7 +4,6 @@ import yaml
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
-from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
@@ -35,40 +34,44 @@ def generate_launch_description():
     reprojection_params = dict(control_params)
     reprojection_params["calib_file_path"] = calib_path
 
-    enable_reprojection = LaunchConfiguration("enable_reprojection")
-    enable_overlay = LaunchConfiguration("enable_overlay")
-
     return LaunchDescription([
-        DeclareLaunchArgument("enable_reprojection", default_value="false"),
-        DeclareLaunchArgument("enable_overlay", default_value="false"),
+        DeclareLaunchArgument(
+            "rviz_config",
+            default_value=os.path.join(package_dir, "config", "odin_ros2.rviz"),
+        ),
         Node(
             package="odin_ros_driver",
-            executable="host_sdk_sample_gpu",
-            name="host_sdk_sample_gpu",
+            executable="host_sdk_sample",
+            name="host_sdk_sample",
             output="screen",
             parameters=[{"config_file": control_path}],
         ),
         Node(
             package="odin_ros_driver",
-            executable="pcd2depth_ros2_node_gpu",
-            name="pcd2depth_ros2_node_gpu",
+            executable="pcd2depth_ros2_node",
+            name="pcd2depth_ros2_node",
             output="screen",
             parameters=[depth_params],
         ),
         Node(
             package="odin_ros_driver",
             executable="cloud_reprojection_ros2_node",
-            name="cloud_reprojection_node_gpu_stack",
+            name="cloud_reprojection_ros2_node",
             output="screen",
             parameters=[reprojection_params],
-            condition=IfCondition(enable_reprojection),
         ),
         Node(
             package="odin_ros_driver",
             executable="image_overlay_node",
-            name="image_overlay_node_gpu_stack",
+            name="image_overlay_node",
             output="screen",
             parameters=[control_params],
-            condition=IfCondition(enable_overlay),
+        ),
+        Node(
+            package="rviz2",
+            executable="rviz2",
+            name="rviz2",
+            output="screen",
+            arguments=["-d", LaunchConfiguration("rviz_config")],
         ),
     ])

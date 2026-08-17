@@ -11,19 +11,19 @@ register_keys:
   streamctrl: 1           # 0: off; 1: on
 
   # original rgb data in jpeg format from device
-  sendrgbcompressed: 0    # 0: off; 1: on
+  sendrgbcompressed: 1    # 0: off; 1: on
 
   # RGB data, decoded from original jpeg data from device, bgr8 format
   # Processed on host device
-  sendrgb: 0              # 0: off; 1: on
+  sendrgb: 1              # 0: off; 1: on
 
   # undistort rgb image processed from decoded rgb data.
-  # related camera parameters are stored in ~/.ros/odin_ros_driver/calib.yaml
+  # depends on sendrgb. related camera parameters can be found in ws/src/odin_ros_driver/config/calib.yaml
   # Processed on host device
-  sendrgbundistort: 1    # 0: off; 1: on.
+  sendrgbundistort: 0    # 0: off; 1: on.
 
   # IMU data
-  sendimu: 0              # 0: off; 1: on
+  sendimu: 1              # 0: off; 1: on
 
   # SDK IMU smooth sending feature
   # When enabled, SDK will send IMU data at precise intervals (default 400Hz) 
@@ -34,7 +34,7 @@ register_keys:
   imu_smooth_frequency: 400  # 1-1000 Hz, recommended 400 Hz
 
   # Odometry data
-  sendodom: 0             # 0: off; 1: on
+  sendodom: 1             # 0: off; 1: on
 
   # TF from odom to imu. Leave it on unless you specifically need it off.
   # ATTENTION: critical for rviz to show cloud_raw.
@@ -55,19 +55,16 @@ register_keys:
   # Note: value is multiplied by 10 (e.g., 145 means 14.5fps)
   dtof_fps: 100           # 100: 10fps; 145: 14.5fps 290: dtof 10hz + camera 29hz(not support)
   # slam cloud data
-  sendcloudslam: 0        # 0: off; 1: on
+  sendcloudslam: 1        # 0: off; 1: on
 
   # processed with raw point cloud, rgb image, and calib.yaml from device
   # Processed on host device
-  sendcloudrender: 0      # 0: off; 1: on
+  sendcloudrender: 1      # 0: off; 1: on
 
   # depth completion demo, high computing resource usage. 
   # for more information please refer to the readme file.
   # Processed on host device
-  senddepth: 1            # 0: off; 1: on
-
-  # colored depth cloud also requires sendrgb: 1 and consumes more resources
-  senddepthcloud: 0       # 0: depth image only; 1: also publish colored depth cloud
+  senddepth: 0            # 0: off; 1: on
 
   # cloud reprojection demo, projects cloud_slam to camera image using odometry
   # Processed on host device
@@ -87,7 +84,7 @@ register_keys:
   recorddata: 0           # 0: off; 1: on
 
   # Save device runtime status info to ws/src/odin_ros_driver/log/Driver_{drvier_start_time}/Conn_{device_connection_time}/dev_status.csv
-  devstatuslog: 0         # 0: off; 1: on.
+  devstatuslog: 1         # 0: off; 1: on.
 
   save_log: 0 # 0: off; 1: on; 
 

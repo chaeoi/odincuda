@@ -113,7 +113,9 @@ pkg_check_modules(LIBUSB REQUIRED libusb-1.0)
 option(ODIN_BUILD_CUDA "Build CUDA-accelerated Odin nodes" ON)
 set(ODIN_CUDA_ARCH "87" CACHE STRING "CUDA SM architecture (87 for Jetson AGX Orin)")
 if(ODIN_BUILD_CUDA)
-    find_package(CUDA 11.4 REQUIRED)
+    # JetPack 5 ships CUDA 11.x and JetPack 6 ships CUDA 12.x.  The
+    # kernels use the common runtime API, so do not reject either release.
+    find_package(CUDA REQUIRED)
     include_directories(${CUDA_INCLUDE_DIRS})
     list(APPEND CUDA_NVCC_FLAGS
         "-O3"
@@ -227,22 +229,8 @@ if(ROS_VERSION STREQUAL "ROS1")
     add_dependencies(host_sdk_sample ${PROJECT_NAME}_generate_messages_cpp)
 
     if(ODIN_BUILD_CUDA)
-        add_executable(host_sdk_sample_gpu
-            src/host_sdk_sample.cpp
-            src/yaml_parser.cpp
-            src/rawCloudRender.cpp
-            src/camera_pose_visualization.cpp
-        )
-        target_compile_definitions(host_sdk_sample_gpu PRIVATE ODIN_ENABLE_CUDA=1)
-        target_link_libraries(host_sdk_sample_gpu
-            odin_cuda_ops
-            ${CUDA_LIBRARIES}
-            ${catkin_LIBRARIES}
-            ${COMMON_LIBS}
-            yaml-cpp
-            usb-1.0
-        )
-        add_dependencies(host_sdk_sample_gpu ${PROJECT_NAME}_generate_messages_cpp)
+        target_compile_definitions(host_sdk_sample PRIVATE ODIN_ENABLE_CUDA=1)
+        target_link_libraries(host_sdk_sample odin_cuda_ops ${CUDA_LIBRARIES})
     endif()
 
     add_library(pointcloud_depth_converter src/pointcloud_depth_converter.cpp)
@@ -266,18 +254,8 @@ if(ROS_VERSION STREQUAL "ROS1")
     )
 
     if(ODIN_BUILD_CUDA)
-        add_library(pointcloud_depth_converter_gpu src/pointcloud_depth_converter.cpp)
-        target_compile_definitions(pointcloud_depth_converter_gpu PRIVATE ODIN_ENABLE_CUDA=1)
-        target_link_libraries(pointcloud_depth_converter_gpu
-            odin_cuda_ops ${CUDA_LIBRARIES} ${OpenCV_LIBS} ${PCL_LIBRARIES})
-
-        add_library(depth_image_ros_node_gpu src/depth_image_ros_node.cpp)
-        target_link_libraries(depth_image_ros_node_gpu
-            pointcloud_depth_converter_gpu ${catkin_LIBRARIES} ${OpenCV_LIBS} ${PCL_LIBRARIES})
-
-        add_executable(pcd2depth_node_gpu src/pcd2depth_ros.cpp)
-        target_link_libraries(pcd2depth_node_gpu
-            depth_image_ros_node_gpu ${catkin_LIBRARIES} ${OpenCV_LIBS} ${PCL_LIBRARIES})
+        target_compile_definitions(pointcloud_depth_converter PRIVATE ODIN_ENABLE_CUDA=1)
+        target_link_libraries(pointcloud_depth_converter odin_cuda_ops ${CUDA_LIBRARIES})
     endif()
 
     add_library(cloud_reprojector src/cloud_reprojector.cpp)
@@ -305,7 +283,7 @@ if(ROS_VERSION STREQUAL "ROS1")
         RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
     )
     if(ODIN_BUILD_CUDA)
-        install(TARGETS host_sdk_sample_gpu pcd2depth_node_gpu odin_cuda_smoke_test
+        install(TARGETS odin_cuda_smoke_test
             RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION})
     endif()
     
@@ -399,19 +377,8 @@ elseif(ROS_VERSION STREQUAL "ROS2")
     )
 
     if(ODIN_BUILD_CUDA)
-        add_executable(host_sdk_sample_gpu
-            src/host_sdk_sample.cpp
-            src/yaml_parser.cpp
-            src/rawCloudRender.cpp
-            src/camera_pose_visualization.cpp
-        )
-        target_compile_definitions(host_sdk_sample_gpu PRIVATE ODIN_ENABLE_CUDA=1)
-        target_link_libraries(host_sdk_sample_gpu
-            odin_cuda_ops ${CUDA_LIBRARIES} ${COMMON_LIBS} yaml-cpp usb-1.0
-            "${cpp_typesupport_target}")
-        ament_target_dependencies(host_sdk_sample_gpu
-            rclcpp std_msgs sensor_msgs nav_msgs visualization_msgs cv_bridge
-            image_transport tf2 tf2_ros geometry_msgs tf2_geometry_msgs ament_index_cpp)
+        target_compile_definitions(host_sdk_sample PRIVATE ODIN_ENABLE_CUDA=1)
+        target_link_libraries(host_sdk_sample odin_cuda_ops ${CUDA_LIBRARIES})
     endif()
     
     add_library(pointcloud_depth_converter_ros2 src/pointcloud_depth_converter.cpp)
@@ -457,23 +424,8 @@ elseif(ROS_VERSION STREQUAL "ROS2")
     )
 
     if(ODIN_BUILD_CUDA)
-        add_library(pointcloud_depth_converter_ros2_gpu src/pointcloud_depth_converter.cpp)
-        target_compile_definitions(pointcloud_depth_converter_ros2_gpu PRIVATE ODIN_ENABLE_CUDA=1)
-        target_link_libraries(pointcloud_depth_converter_ros2_gpu
-            odin_cuda_ops ${CUDA_LIBRARIES} ${OpenCV_LIBS} ${PCL_LIBRARIES})
-
-        add_library(depth_image_ros2_node_lib_gpu src/depth_image_ros2_node.cpp)
-        target_link_libraries(depth_image_ros2_node_lib_gpu
-            pointcloud_depth_converter_ros2_gpu ${OpenCV_LIBS} ${PCL_LIBRARIES})
-        ament_target_dependencies(depth_image_ros2_node_lib_gpu
-            rclcpp sensor_msgs std_msgs cv_bridge image_transport pcl_conversions message_filters)
-
-        add_executable(pcd2depth_ros2_node_gpu src/pcd2depth_ros2.cpp)
-        target_link_libraries(pcd2depth_ros2_node_gpu
-            depth_image_ros2_node_lib_gpu ${OpenCV_LIBS} ${PCL_LIBRARIES} yaml-cpp)
-        ament_target_dependencies(pcd2depth_ros2_node_gpu
-            rclcpp rcpputils sensor_msgs std_msgs cv_bridge image_transport
-            pcl_conversions message_filters)
+        target_compile_definitions(pointcloud_depth_converter_ros2 PRIVATE ODIN_ENABLE_CUDA=1)
+        target_link_libraries(pointcloud_depth_converter_ros2 odin_cuda_ops ${CUDA_LIBRARIES})
     endif()
 
     add_library(cloud_reprojector_ros2 src/cloud_reprojector.cpp)
@@ -531,13 +483,7 @@ elseif(ROS_VERSION STREQUAL "ROS2")
     )
     if(ODIN_BUILD_CUDA)
         install(TARGETS
-            host_sdk_sample_gpu
-            pcd2depth_ros2_node_gpu
             odin_cuda_smoke_test
-            depth_image_ros2_node_lib_gpu
-            pointcloud_depth_converter_ros2_gpu
-            ARCHIVE DESTINATION lib
-            LIBRARY DESTINATION lib
             RUNTIME DESTINATION lib/${PROJECT_NAME})
     endif()
     
@@ -604,10 +550,6 @@ if(TARGET_PLATFORM STREQUAL "arm")
     set_target_properties(host_sdk_sample PROPERTIES
         LINK_FLAGS "-Wl,--no-as-needed -Wl,--rpath=${LIB_DIR}"
     )
-    if(TARGET host_sdk_sample_gpu)
-        set_target_properties(host_sdk_sample_gpu PROPERTIES
-            LINK_FLAGS "-Wl,--no-as-needed -Wl,--rpath=${LIB_DIR}")
-    endif()
     message(STATUS "Adding ARM-specific link options and RPATH")
 endif()
 

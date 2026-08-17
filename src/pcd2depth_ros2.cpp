@@ -160,8 +160,6 @@ int main(int argc, char **argv)
             throw std::runtime_error("Missing 'senddepth' parameter");
         }  
     int senddepth = config["register_keys"]["senddepth"].as<int>();
-    const bool senddepthcloud = config["register_keys"]["senddepthcloud"] &&
-                                config["register_keys"]["senddepthcloud"].as<int>() != 0;
     std::cout << "senddepth: " <<    senddepth << std::endl;
     if(senddepth == 0)
     {
@@ -196,7 +194,6 @@ int main(int argc, char **argv)
     }
     
     rclcpp::NodeOptions depth_node_options;
-    depth_node_options.use_global_arguments(false);
     
     std::vector<rclcpp::Parameter> params_override;
     
@@ -215,8 +212,6 @@ int main(int argc, char **argv)
         params_override.push_back(rclcpp::Parameter("cam_0.k6", node->get_parameter("cam_0.k6").as_double()));
         params_override.push_back(rclcpp::Parameter("cam_0.k7", node->get_parameter("cam_0.k7").as_double()));
         params_override.push_back(rclcpp::Parameter("Tcl_0", node->get_parameter("Tcl_0").as_double_array()));
-        params_override.push_back(rclcpp::Parameter("publish_depth_cloud", senddepthcloud));
-        
         depth_node_options.parameter_overrides(params_override);
         
         RCLCPP_INFO(node->get_logger(), "Parameters successfully prepared for DepthImageRos2Node");

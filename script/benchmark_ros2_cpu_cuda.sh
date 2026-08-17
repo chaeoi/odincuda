@@ -205,19 +205,9 @@ run_variant() {
     local host_executable depth_executable host_binary depth_binary
     local variant_dir host_log depth_log cpu_csv tegra_log summary_file
 
-    case "$variant" in
-        cpu)
-            host_executable='host_sdk_sample'
-            depth_executable='pcd2depth_ros2_node'
-            ;;
-        gpu)
-            host_executable='host_sdk_sample_gpu'
-            depth_executable='pcd2depth_ros2_node_gpu'
-            ;;
-        *)
-            fail "unknown variant: $variant"
-            ;;
-    esac
+    # CUDA is compiled into the official executable names.
+    host_executable='host_sdk_sample'
+    depth_executable='pcd2depth_ros2_node'
 
     host_binary="${INSTALL_DIR}/odin_ros_driver/lib/odin_ros_driver/${host_executable}"
     depth_binary="${INSTALL_DIR}/odin_ros_driver/lib/odin_ros_driver/${depth_executable}"
@@ -311,16 +301,6 @@ ros2 run odin_ros_driver odin_cuda_smoke_test > "${RESULT_DIR}/cuda_smoke.txt" 2
     fail "CUDA smoke test failed"
 cat "${RESULT_DIR}/cuda_smoke.txt"
 
-run_variant cpu
-run_variant gpu
-
-cpu_avg="$(awk -F= '$1 == "total_cpu_avg" {print $2}' "${RESULT_DIR}/cpu/summary.txt")"
-gpu_avg="$(awk -F= '$1 == "total_cpu_avg" {print $2}' "${RESULT_DIR}/gpu/summary.txt")"
-awk -v cpu="$cpu_avg" -v gpu="$gpu_avg" 'BEGIN {
-    reduction = (cpu > 0) ? (cpu - gpu) * 100.0 / cpu : 0;
-    printf "cpu_total_avg=%.2f%%\n", cpu;
-    printf "cuda_total_avg=%.2f%%\n", gpu;
-    printf "cpu_reduction=%.2f%%\n", reduction;
-}' | tee "${RESULT_DIR}/comparison.txt"
+run_variant cuda
 
 echo "Benchmark results: $RESULT_DIR"

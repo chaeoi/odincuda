@@ -1,25 +1,26 @@
 <launch>
-    <!-- Experimental CUDA build. Do not run beside the original Odin launch. -->
-    <arg name="node_name" default="host_sdk_sample_gpu"/>
+    <!-- CUDA is built into the official target when ODIN_BUILD_CUDA is enabled. -->
+    <arg name="node_name" default="host_sdk_sample"/>
     <arg name="config_file" default="$(find odin_ros_driver)/config/control_command.yaml"/>
-    <arg name="enable_reprojection" default="false"/>
-    <arg name="enable_overlay" default="false"/>
+    <arg name="rviz_config" default="$(find odin_ros_driver)/config/odin_ros.rviz"/>
 
-    <node name="$(arg node_name)" pkg="odin_ros_driver" type="host_sdk_sample_gpu" output="screen">
+    <node name="$(arg node_name)" pkg="odin_ros_driver" type="host_sdk_sample" output="screen">
         <param name="config_file" value="$(arg config_file)"/>
     </node>
 
-    <node pkg="odin_ros_driver" type="pcd2depth_node_gpu" name="pcd2depth_node_gpu" output="screen">
+    <node pkg="odin_ros_driver" type="pcd2depth_node" name="pcd2depth_node" output="screen">
         <rosparam command="load" file="$(find odin_ros_driver)/config/control_command.yaml"/>
         <!-- calib_file_path defaults to ~/.ros/odin_ros_driver/calib.yaml -->
     </node>
 
-    <node if="$(arg enable_reprojection)" pkg="odin_ros_driver" type="cloud_reprojection_node" name="cloud_reprojection_node_gpu_stack" output="screen">
+    <node pkg="odin_ros_driver" type="cloud_reprojection_node" name="cloud_reprojection_node" output="screen">
         <rosparam command="load" file="$(find odin_ros_driver)/config/control_command.yaml"/>
         <!-- calib_file_path defaults to ~/.ros/odin_ros_driver/calib.yaml -->
     </node>
 
-    <node if="$(arg enable_overlay)" pkg="odin_ros_driver" type="image_overlay_node" name="image_overlay_node_gpu_stack" output="screen">
+    <node pkg="odin_ros_driver" type="image_overlay_node" name="image_overlay_node" output="screen">
         <rosparam command="load" file="$(find odin_ros_driver)/config/control_command.yaml"/>
     </node>
+
+    <node name="rviz" pkg="rviz" type="rviz" args="-d $(arg rviz_config)" output="screen"/>
 </launch>

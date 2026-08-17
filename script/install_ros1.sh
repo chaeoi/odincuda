@@ -229,4 +229,4 @@ echo "请重新登录一次，使 plugdev 用户组生效，并物理拔插相�
 echo "启动命令："
 echo "  source /opt/ros/noetic/setup.bash"
 echo "  source '$ODIN_WORKSPACE/devel/setup.bash'"
-echo "  roslaunch odin_ros_driver odin1_ros1_gpu.launch"
+echo "  roslaunch odin_ros_driver odin1_ros1.launch"

@@ -8,6 +8,9 @@
     
     <!-- Set parameter file path -->
     <arg name="config_file" default="$(find odin_ros_driver)/config/control_command.yaml"/>
+
+    <!-- Set RViz configuration file path -->
+    <arg name="rviz_config" default="$(find odin_ros_driver)/config/odin_ros.rviz"/>
     
     <!-- Launch main node -->
     <node name="$(arg node_name)" pkg="odin_ros_driver" type="host_sdk_sample" output="screen">
@@ -28,4 +31,7 @@
     <node pkg="odin_ros_driver" type="image_overlay_node" name="image_overlay_node" output="screen" >
         <rosparam command="load" file="$(find odin_ros_driver)/config/control_command.yaml"/>
     </node>
+
+    <!-- Launch RViz with configuration -->
+    <node name="rviz" pkg="rviz" type="rviz" args="-d $(arg rviz_config)" output="screen"/>
 </launch>
