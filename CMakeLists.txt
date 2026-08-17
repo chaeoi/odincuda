@@ -483,7 +483,10 @@ elseif(ROS_VERSION STREQUAL "ROS2")
     )
     if(ODIN_BUILD_CUDA)
         install(TARGETS
+            odin_cuda_ops
             odin_cuda_smoke_test
+            EXPORT export_${PROJECT_NAME}
+            ARCHIVE DESTINATION lib
             RUNTIME DESTINATION lib/${PROJECT_NAME})
     endif()
     
