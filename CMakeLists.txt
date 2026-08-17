@@ -255,7 +255,7 @@ if(ROS_VERSION STREQUAL "ROS1")
 
     if(ODIN_BUILD_CUDA)
         target_compile_definitions(pointcloud_depth_converter PRIVATE ODIN_ENABLE_CUDA=1)
-        target_link_libraries(pointcloud_depth_converter odin_cuda_ops ${CUDA_LIBRARIES})
+        target_link_libraries(pointcloud_depth_converter PRIVATE odin_cuda_ops ${CUDA_LIBRARIES})
     endif()
 
     add_library(cloud_reprojector src/cloud_reprojector.cpp)
@@ -425,7 +425,7 @@ elseif(ROS_VERSION STREQUAL "ROS2")
 
     if(ODIN_BUILD_CUDA)
         target_compile_definitions(pointcloud_depth_converter_ros2 PRIVATE ODIN_ENABLE_CUDA=1)
-        target_link_libraries(pointcloud_depth_converter_ros2 odin_cuda_ops ${CUDA_LIBRARIES})
+        target_link_libraries(pointcloud_depth_converter_ros2 PRIVATE odin_cuda_ops ${CUDA_LIBRARIES})
     endif()
 
     add_library(cloud_reprojector_ros2 src/cloud_reprojector.cpp)
