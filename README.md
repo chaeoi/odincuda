@@ -57,7 +57,7 @@ CUDA 运行时发生错误时会记录一次警告并使用同一官方目标内
 
 `config/control_command.yaml` 保持官方默认值，完整官方话题和开关均可用：原始/压缩
 RGB、IMU、里程计、SLAM 点云、渲染点云和状态日志默认开启，深度补全默认关闭。需要
-导航 TF 时保持 `send_odom_baselink_tf: 1`；它发布 `odom -> odin1_base_link` 的 TF，
+导航 TF 时保持 `send_odom_baselink_tf: 1`；它发布官方约定的 `odom -> imu` TF，
 供 RViz 和导航消费。
 
 保存地图前把 `custom_map_mode` 设为 `1`（SLAM），然后在驱动运行期间执行：
