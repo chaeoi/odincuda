@@ -234,7 +234,7 @@ if(ROS_VERSION STREQUAL "ROS1")
     endif()
 
     add_library(pointcloud_depth_converter src/pointcloud_depth_converter.cpp)
-    target_link_libraries(pointcloud_depth_converter
+    target_link_libraries(pointcloud_depth_converter PRIVATE
     ${OpenCV_LIBS}
     ${PCL_LIBRARIES}
     )
@@ -382,7 +382,7 @@ elseif(ROS_VERSION STREQUAL "ROS2")
     endif()
     
     add_library(pointcloud_depth_converter_ros2 src/pointcloud_depth_converter.cpp)
-    target_link_libraries(pointcloud_depth_converter_ros2
+    target_link_libraries(pointcloud_depth_converter_ros2 PRIVATE
         ${OpenCV_LIBS}
         ${PCL_LIBRARIES}
     )
