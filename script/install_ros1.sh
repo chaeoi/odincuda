@@ -64,12 +64,19 @@ run_as_target() {
 }
 
 install_source_archive() {
-    local temp_dir archive extracted backup_dir
+    local temp_dir archive extracted backup_dir archive_url fallback_archive_url
     temp_dir="$(mktemp -d)"
     archive="${temp_dir}/odin.tar.gz"
     extracted="${temp_dir}/source"
     mkdir -p "$extracted"
-    curl -fL --retry 4 --retry-delay 2 "$ARCHIVE_URL" -o "$archive"
+    # GitWarp may retain a branch archive after main advances.  A unique query
+    # string ensures the installer always receives the revision it requested.
+    archive_url="${ARCHIVE_URL}?cachebust=$(date +%s)"
+    fallback_archive_url="https://codeload.github.com/${REPO_OWNER}/${REPO_NAME}/tar.gz/refs/heads/${ODIN_BRANCH}"
+    if ! curl -fL --retry 4 --retry-delay 2 "$archive_url" -o "$archive"; then
+        echo "GitWarp 下载失败，尝试直连 GitHub..." >&2
+        curl -fL --retry 4 --retry-delay 2 "$fallback_archive_url" -o "$archive"
+    fi
     tar -xzf "$archive" --strip-components=1 -C "$extracted"
     test -f "${extracted}/CMakeLists.txt"
     bash "${extracted}/script/download_vendor_sdk.sh" "$extracted"
