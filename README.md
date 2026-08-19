@@ -158,8 +158,7 @@ source install/setup.bash
 ros2 launch odin_ros_driver odin1_ros2.launch.py
 ```
 
-两个启动文件都使用官方节点名；带 `_gpu` 的启动文件只是兼容别名，里面不会启动
-重复的 `_gpu` 可执行程序。
+启动文件使用官方节点名；CUDA 已经集成在官方目标内部，直接使用上面的官方启动文件即可。
 
 ## 性能对比
 
@@ -196,7 +195,7 @@ ROS1 使用同样的官方目标名和 CUDA 内置实现；启动、话题和配
 ## 相对官方 v0.14.0 的文件改动
 
 对比基准是官方提交 `6f993ccc4ccad9395bfc68bc3235f993d83c4fe6`。当前仓库相对该
-版本新增 10 个文件、修改 25 个文件、删除 0 个文件。
+版本新增 8 个文件、修改 21 个文件、删除 0 个文件。
 
 新增文件：
 
@@ -206,8 +205,6 @@ ROS1 使用同样的官方目标名和 CUDA 内置实现；启动、话题和配
 | `include/odin_cuda_ops.hpp` | 定义图像映射、彩色点云和深度处理 CUDA 接口。 |
 | `src/odin_cuda_ops.cu` | 实现 CUDA kernel、显存管理、结果回读和错误返回。 |
 | `src/odin_cuda_smoke_test.cpp` | 新增不依赖相机的 CUDA 分配、kernel 和回读自检。 |
-| `launch_ROS1/odin1_ros1_gpu.launch` | 兼容别名，仍调用官方 ROS 1 节点名。 |
-| `launch_ROS2/odin1_ros2_gpu.launch.py` | 兼容别名，仍调用官方 ROS 2 节点名。 |
 | `script/install_ros1.sh` | 新增 ROS 1 一键安装脚本，源码及本地 rosdep 快照通过 GitWarp codeload 下载。 |
 | `script/install_ros2.sh` | 新增 ROS 2 一键安装脚本，源码及本地 rosdep 快照通过 GitWarp codeload 下载。 |
 | `script/benchmark_ros2_cpu_cuda.sh` | 采样官方 CUDA 目标的 CPU、RSS 和 Jetson GPU 使用率。 |
@@ -217,13 +214,14 @@ ROS1 使用同样的官方目标名和 CUDA 内置实现；启动、话题和配
 
 | 文件 | 改动 |
 | --- | --- |
+| `.gitignore` | 忽略本地校准、构建产物和部署生成目录。 |
 | `CMakeLists.txt` | 将 CUDA 编译进官方目标，保留 Orin `sm_87`、自检目标、安装规则和 ROS 依赖。 |
 | `README.md` | 改为本仓库的中文安装、CUDA 范围、性能对比和上游差异说明。 |
-| `config/control_command.yaml` | 恢复官方默认开关和官方配置键。 |
 | `include/host_sdk_sample.h` | 接入 CUDA 去畸变/彩色点云接口，保留官方发布行为。 |
+| `include/lidar_api_type.h` | 仅清理行尾空白，不改变 SDK 类型。 |
+| `include/pointcloud_depth_converter.hpp` | 仅补充文件尾换行，不改变转换器接口。 |
 | `src/host_sdk_sample.cpp` | 修复地图目录创建和 `save_map` 请求校验，保留官方触发方式。 |
 | `src/pointcloud_depth_converter.cpp` | 接入 CUDA 深度流水线和同目标内的保护性 CPU 回退。 |
-| `src/depth_image_ros_node.cpp` | 恢复官方 ROS 1 深度同步和发布行为。 |
 | `src/depth_image_ros2_node.cpp` | 恢复官方 ROS 2 深度同步和发布行为。 |
 | `src/pcd2depth_ros2.cpp` | 保留官方参数和节点行为。 |
 | `launch_ROS1/odin1_ros1.launch` | 恢复官方 RViz 参数和节点。 |
@@ -236,7 +234,6 @@ ROS1 使用同样的官方目标名和 CUDA 内置实现；启动、话题和配
 | `CHANGELOG.md` | 仅清理尾部空白，不改变内容。 |
 | `RELOCALIZATION_GUIDE.md` | 仅清理空白和文件尾换行，不改变说明内容。 |
 | `include/lidar_api.h` | 仅清理行尾空白，不改变 SDK API。 |
-| `include/lidar_api_type.h` | 仅清理行尾空白，不改变 SDK 类型。 |
 | `script/rosbag2_qos.yaml` | 仅统一文件尾换行，不改变 QoS。 |
 
 删除文件：无。官方 v0.14.0 的目录和厂商 SDK 文件均保留。
