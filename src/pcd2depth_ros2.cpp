@@ -212,6 +212,7 @@ int main(int argc, char **argv)
         params_override.push_back(rclcpp::Parameter("cam_0.k6", node->get_parameter("cam_0.k6").as_double()));
         params_override.push_back(rclcpp::Parameter("cam_0.k7", node->get_parameter("cam_0.k7").as_double()));
         params_override.push_back(rclcpp::Parameter("Tcl_0", node->get_parameter("Tcl_0").as_double_array()));
+        
         depth_node_options.parameter_overrides(params_override);
         
         RCLCPP_INFO(node->get_logger(), "Parameters successfully prepared for DepthImageRos2Node");

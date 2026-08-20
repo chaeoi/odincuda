@@ -36,9 +36,9 @@ typedef enum {
 
 /**
  * @brief Data types for lidar_data_callback_t
- *
+ * 
  * Each type corresponds to a specific stream format in lidar_data_t.stream (capture_Image_List_t).
- *
+ * 
  * ┌─────────────────────────────────────────────────────────────────────────────────────────────┐
  * │ LIDAR_DT_RAW_RGB                                                                            │
  * │   imageCount: 1                                                                             │
@@ -186,7 +186,7 @@ typedef struct {
 
 typedef struct icm_6aixs_data_t {
 	int16_t aacx;
-	int16_t aacy;
+	int16_t aacy; 
 	int16_t aacz;
 	int16_t gyrox;
 	int16_t gyroy;
@@ -253,7 +253,7 @@ typedef struct {
 
 /**
  * @brief RGB image sensor frame rate
- *
+ * 
  */
  typedef struct{
 
@@ -264,7 +264,7 @@ typedef struct {
 
 /**
  * @brief DTOF Lidar frame rate
- *
+ * 
  */
 typedef struct{
 
@@ -278,7 +278,7 @@ typedef struct{
 
 /**
  * @brief IMU Sensor
- *
+ * 
  */
 typedef struct{
 

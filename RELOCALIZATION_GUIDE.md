@@ -306,9 +306,9 @@ You can also set `init_pos` programmatically using the `lidar_set_custom_paramet
  * @param value_length Size of the data in bytes
  * @return 0 on success, -1 on error, -2 if file transfer in progress
  */
-int lidar_set_custom_parameter(device_handle device,
-                                const char* param_name,
-                                const void* value_data,
+int lidar_set_custom_parameter(device_handle device, 
+                                const char* param_name, 
+                                const void* value_data, 
                                 size_t value_length);
 ```
 
@@ -327,26 +327,26 @@ void yaw_to_quaternion(float yaw_rad, float* qx, float* qy, float* qz, float* qw
     *qw = cosf(yaw_rad / 2.0f);
 }
 
-int set_init_position(device_handle device,
-                      float x, float y, float z,
+int set_init_position(device_handle device, 
+                      float x, float y, float z, 
                       float qx, float qy, float qz, float qw) {
     // init_pos format: [x, y, z, qx, qy, qz, qw] - 7 floats
     float init_pos[7] = {x, y, z, qx, qy, qz, qw};
-
+    
     int result = lidar_set_custom_parameter(
         device,
         "init_pos",           // Parameter name
         init_pos,             // Data pointer
         sizeof(init_pos)      // 7 * sizeof(float) = 28 bytes
     );
-
+    
     if (result == 0) {
         printf("Successfully set init_pos: [%.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f]\n",
                x, y, z, qx, qy, qz, qw);
     } else {
         printf("Failed to set init_pos, error code: %d\n", result);
     }
-
+    
     return result;
 }
 
@@ -354,7 +354,7 @@ int set_init_position(device_handle device,
 
 // Example 1: Set position at origin with no rotation
 void example_origin(device_handle device) {
-    set_init_position(device,
+    set_init_position(device, 
                       0.0f, 0.0f, 0.0f,      // x, y, z
                       0.0f, 0.0f, 0.0f, 1.0f // qx, qy, qz, qw (identity)
     );
@@ -365,9 +365,9 @@ void example_with_rotation(device_handle device) {
     float qx, qy, qz, qw;
     float yaw_degrees = 90.0f;
     float yaw_rad = yaw_degrees * M_PI / 180.0f;
-
+    
     yaw_to_quaternion(yaw_rad, &qx, &qy, &qz, &qw);
-
+    
     set_init_position(device,
                       5.2f, -3.1f, 0.0f,    // x, y, z
                       qx, qy, qz, qw        // quaternion from yaw
@@ -379,7 +379,7 @@ void example_from_external_localization(device_handle device,
                                          double ext_x, double ext_y, double ext_yaw) {
     float qx, qy, qz, qw;
     yaw_to_quaternion((float)ext_yaw, &qx, &qy, &qz, &qw);
-
+    
     set_init_position(device,
                       (float)ext_x, (float)ext_y, 0.0f,
                       qx, qy, qz, qw
@@ -407,11 +407,11 @@ void initialPoseCallback(const geometry_msgs::PoseWithCovarianceStamped::ConstPt
         (float)msg->pose.pose.orientation.z,
         (float)msg->pose.pose.orientation.w
     };
-
+    
     int result = lidar_set_custom_parameter(device, "init_pos", init_pos, sizeof(init_pos));
-
+    
     if (result == 0) {
-        ROS_INFO("Set init_pos from RViz: [%.2f, %.2f, %.2f]",
+        ROS_INFO("Set init_pos from RViz: [%.2f, %.2f, %.2f]", 
                  init_pos[0], init_pos[1], init_pos[2]);
     } else {
         ROS_ERROR("Failed to set init_pos: %d", result);
@@ -446,9 +446,9 @@ void initialPoseCallback(const geometry_msgs::PoseWithCovarianceStamped::ConstPt
  * @param value_length 数据大小（字节）
  * @return 成功返回 0，错误返回 -1，文件传输中返回 -2
  */
-int lidar_set_custom_parameter(device_handle device,
-                                const char* param_name,
-                                const void* value_data,
+int lidar_set_custom_parameter(device_handle device, 
+                                const char* param_name, 
+                                const void* value_data, 
                                 size_t value_length);
 ```
 
@@ -467,26 +467,26 @@ void yaw_to_quaternion(float yaw_rad, float* qx, float* qy, float* qz, float* qw
     *qw = cosf(yaw_rad / 2.0f);
 }
 
-int set_init_position(device_handle device,
-                      float x, float y, float z,
+int set_init_position(device_handle device, 
+                      float x, float y, float z, 
                       float qx, float qy, float qz, float qw) {
     // init_pos 格式: [x, y, z, qx, qy, qz, qw] - 7 个 float
     float init_pos[7] = {x, y, z, qx, qy, qz, qw};
-
+    
     int result = lidar_set_custom_parameter(
         device,
         "init_pos",           // 参数名
         init_pos,             // 数据指针
         sizeof(init_pos)      // 7 * sizeof(float) = 28 字节
     );
-
+    
     if (result == 0) {
         printf("成功设置 init_pos: [%.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f]\n",
                x, y, z, qx, qy, qz, qw);
     } else {
         printf("设置 init_pos 失败，错误码: %d\n", result);
     }
-
+    
     return result;
 }
 
@@ -494,7 +494,7 @@ int set_init_position(device_handle device,
 
 // 示例 1：在原点设置位置，无旋转
 void example_origin(device_handle device) {
-    set_init_position(device,
+    set_init_position(device, 
                       0.0f, 0.0f, 0.0f,      // x, y, z
                       0.0f, 0.0f, 0.0f, 1.0f // qx, qy, qz, qw（单位四元数）
     );
@@ -505,9 +505,9 @@ void example_with_rotation(device_handle device) {
     float qx, qy, qz, qw;
     float yaw_degrees = 90.0f;
     float yaw_rad = yaw_degrees * M_PI / 180.0f;
-
+    
     yaw_to_quaternion(yaw_rad, &qx, &qy, &qz, &qw);
-
+    
     set_init_position(device,
                       5.2f, -3.1f, 0.0f,    // x, y, z
                       qx, qy, qz, qw        // 从偏航角计算的四元数
@@ -519,7 +519,7 @@ void example_from_external_localization(device_handle device,
                                          double ext_x, double ext_y, double ext_yaw) {
     float qx, qy, qz, qw;
     yaw_to_quaternion((float)ext_yaw, &qx, &qy, &qz, &qw);
-
+    
     set_init_position(device,
                       (float)ext_x, (float)ext_y, 0.0f,
                       qx, qy, qz, qw
@@ -547,11 +547,11 @@ void initialPoseCallback(const geometry_msgs::PoseWithCovarianceStamped::ConstPt
         (float)msg->pose.pose.orientation.z,
         (float)msg->pose.pose.orientation.w
     };
-
+    
     int result = lidar_set_custom_parameter(device, "init_pos", init_pos, sizeof(init_pos));
-
+    
     if (result == 0) {
-        ROS_INFO("从 RViz 设置 init_pos: [%.2f, %.2f, %.2f]",
+        ROS_INFO("从 RViz 设置 init_pos: [%.2f, %.2f, %.2f]", 
                  init_pos[0], init_pos[1], init_pos[2]);
     } else {
         ROS_ERROR("设置 init_pos 失败: %d", result);
@@ -639,3 +639,4 @@ void initialPoseCallback(const geometry_msgs::PoseWithCovarianceStamped::ConstPt
 
 - [README.md](README.md) - Main documentation
 - [config/control_command.yaml](config/control_command.yaml) - Configuration file
+

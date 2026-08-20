@@ -4,14 +4,14 @@
 /**
  * @file lidar_api.h
  * @brief LiDAR device API for controlling and accessing LiDAR sensor data
- *
+ * 
  * This header provides the public interface for interacting with LiDAR devices.
  * It includes functions for device management, data streaming control, and
  * device configuration.
  *
  * @copyright Copyright (c) 2025, Manifold Tech Limited, All Rights Reserved
  * @version 1.0
- *
+ * 
  * ┌──────────────────────────────────────────────────────────────────────────────┐
  * │                              QUICK START                                     │
  * ├──────────────────────────────────────────────────────────────────────────────┤
@@ -114,16 +114,16 @@ extern "C" {
 
 /**
  * @brief Initialize the LiDAR system
- *
+ * 
  * Must be called before any other lidar function to set up the system resources.
  * This function starts device discovery and will invoke the callback when devices
  * are found or disconnected.
- *
+ * 
  * @param cb Callback function for device events:
  *           - Called with attach=true when a new device is discovered
  *           - Called with attach=false when a device is disconnected
  *           - The lidar_device_info_t contains serial number to identify the device
- *
+ * 
  * Example callback:
  *   void device_callback(const lidar_device_info_t* info, bool attach) {
  *       if (attach) {
@@ -133,44 +133,44 @@ extern "C" {
  *           printf("Device disconnected: %s\n", info->serial);
  *       }
  *   }
- *
+ * 
  * @return int 0 on success, negative error code on failure
  */
 int lidar_system_init(lidar_device_callback_t cb);
 
 /**
  * @brief Deinitialize the LiDAR system
- *
+ * 
  * Releases all resources allocated by the system. Should be called when
  * application is shutting down.
- *
+ * 
  * @return int 0 on success, negative error code on failure
  */
 int lidar_system_deinit(void);
 
 /**
  * @brief Create a handle for a LiDAR device
- *
+ * 
  * Creates a device handle using the device info received from the device callback.
  * The handle is used for all subsequent operations on the device.
- *
+ * 
  * @param dev_info Information about the LiDAR device (from lidar_system_init callback)
  *                 - serial: Device serial number (required, used to identify device)
  *                 - model: Device model string
  *                 - online: Device connection status
  * @param device [OUTPUT] Pointer to receive the device handle upon success
  * @return int 0 on success, negative error code on failure
- *
+ * 
  * @note The dev_info should be the same structure received from the device callback
  */
 int lidar_create_device(lidar_device_info_t *dev_info, device_handle *device);
 
 /**
  * @brief Destroy a LiDAR device handle
- *
- * Releases resources associated with the device handle. Must be called
+ * 
+ * Releases resources associated with the device handle. Must be called 
  * when the device is no longer needed.
- *
+ * 
  * @param device Handle to the device to destroy
  * @return int 0 on success, negative error code on failure
  */
@@ -178,15 +178,15 @@ int lidar_destory_device(device_handle device);
 
 /**
  * @brief Register callback function for receiving LiDAR data streams
- *
+ * 
  * Sets up a callback function that will be called when new data is available.
  * All data types use the same callback; use lidar_data_t.type to distinguish.
- *
+ * 
  * @param device Handle to the target device
  * @param cb Callback info structure:
  *           - data_callback: Function pointer, signature: void(const lidar_data_t*, void*)
  *           - user_data: User context pointer passed to callback (can be NULL)
- *
+ * 
  * Example:
  *   void data_callback(const lidar_data_t* data, void* user_data) {
  *       switch (data->type) {
@@ -202,9 +202,9 @@ int lidar_destory_device(device_handle device);
  *               break;
  *       }
  *   }
- *
+ * 
  * @return int 0 on success, negative error code on failure
- *
+ * 
  * @warning Callback is invoked from SDK internal threads. Avoid blocking operations.
  * @warning Data pointers are only valid during callback execution. Copy if needed.
  */
@@ -212,9 +212,9 @@ int lidar_register_stream_callback(device_handle device, lidar_data_callback_inf
 
 /**
  * @brief Unregister stream callback for a device
- *
+ * 
  * Stops the device from calling back when new data is available.
- *
+ * 
  * @param device Handle to the target device
  * @return int 0 on success, negative error code on failure
  */
@@ -222,9 +222,9 @@ int lidar_unregister_stream_callback(device_handle device);
 
 /**
  * @brief Open a LiDAR device for communication
- *
+ * 
  * Establishes a connection to the physical device.
- *
+ * 
  * @param device Handle to the device to open
  * @return int 0 on success, negative error code on failure
  */
@@ -232,9 +232,9 @@ int lidar_open_device(device_handle device);
 
 /**
  * @brief Close a LiDAR device
- *
+ * 
  * Closes the connection to the physical device.
- *
+ * 
  * @param device Handle to the device to close
  * @return int 0 on success, negative error code on failure
  */
@@ -242,10 +242,10 @@ int lidar_close_device(device_handle device);
 
 /**
  * @brief Set the operating mode of the LiDAR device
- *
+ * 
  * Must be called after lidar_open_device() and before lidar_start_stream().
  * Mode determines which data types are available for streaming.
- *
+ * 
  * @param device Handle to the target device
  * @param mode Operating mode to set:
  *              - LIDAR_MODE_RAW: Raw sensor data (RGB, IMU, DTOF)
@@ -256,10 +256,10 @@ int lidar_set_mode(device_handle device, int mode);
 
 /**
  * @brief Start data streaming from the device
- *
+ * 
  * Begins the flow of data from the device for the specified type.
  * After calling this function, registered callbacks will start receiving data.
- *
+ * 
  * @param device Handle to the target device
  * @param type Type of data stream to start (lidar_data_type_e):
  *              - LIDAR_DT_RAW_RGB: RGB camera frames
@@ -272,7 +272,7 @@ int lidar_set_mode(device_handle device, int mode);
  *                          Only meaningful when type=LIDAR_DT_RAW_DTOF.
  *                          For other types, this value can be ignored.
  * @return int 0 on success, negative error code on failure
- *
+ * 
  * @note You can start multiple stream types simultaneously by calling this
  *       function multiple times with different types.
  */
@@ -280,9 +280,9 @@ int lidar_start_stream(device_handle device, int type, uint32_t &dtof_subframe_o
 
 /**
  * @brief Stop data streaming from the device
- *
+ * 
  * Stops the flow of data from the device for the specified type.
- *
+ * 
  * @param device Handle to the target device
  * @param type Type of data stream to stop
  * @return int 0 on success, negative error code on failure
@@ -291,21 +291,21 @@ int lidar_stop_stream(device_handle device, int type);
 
 /**
  * @brief Activate a specific stream type on the device
- *
+ * 
  * Enables a specific data stream type in the device configuration.
  * This configures the device to be ready for the stream type, but does NOT
  * start actual data transmission. Call lidar_start_stream() to begin streaming.
- *
+ * 
  * Use this to pre-configure multiple stream types before starting them:
  *   activate_stream_type(handle, LIDAR_DT_RAW_IMU);
  *   activate_stream_type(handle, LIDAR_DT_RAW_DTOF);
  *   start_stream(handle, LIDAR_DT_RAW_IMU, odr);
  *   start_stream(handle, LIDAR_DT_RAW_DTOF, odr);
- *
+ * 
  * @param device Handle to the target device
  * @param type Type of data stream to activate (lidar_data_type_e)
  * @return int 0 on success, negative error code on failure
- *
+ * 
  * @see lidar_start_stream() to actually begin data transmission
  * @see lidar_deactivate_stream_type() to disable a stream type
  */
@@ -313,9 +313,9 @@ int lidar_activate_stream_type(device_handle device, int type);
 
 /**
  * @brief Deactivate a specific stream type on the device
- *
+ * 
  * Disables a specific data stream type in the device configuration.
- *
+ * 
  * @param device Handle to the target device
  * @param type Type of data stream to deactivate
  * @return int 0 on success, negative error code on failure
@@ -331,9 +331,9 @@ int lidar_get_calib_file(device_handle device, const char* path);
 
 /**
  * @brief Get device calibration parameters
- *
+ * 
  * Retrieves the current calibration parameters from the device.
- *
+ * 
  * @param device Handle to the target device
  * @param param Pointer to receive the calibration parameters
  * @return int 0 on success, negative error code on failure
@@ -342,9 +342,9 @@ int lidar_get_calibration(device_handle device, lidar_calibration_t* param);
 
 /**
  * @brief Set device calibration parameters
- *
+ * 
  * Applies new calibration parameters to the device.
- *
+ * 
  * @param device Handle to the target device
  * @param param Pointer to the calibration parameters to set
  * @return int 0 on success, negative error code on failure
@@ -353,18 +353,18 @@ int lidar_set_calibration(device_handle device, const lidar_calibration_t *param
 
 /**
  * @brief Set log verbosity level
- *
+ * 
  * Controls the amount of log information generated by the LiDAR API.
- *
+ * 
  * @param level Log level to set (see level definitions in lidar_api_type.h)
  */
 void lidar_log_set_level(lidar_log_level_e level);
 
 /**
  * @brief Get the version information of the LiDAR device
- *
+ * 
  * Retrieves version information including firmware, system, and application versions.
- *
+ * 
  * @param device Handle to the target device
  * @param version struct Pointer to receive the version information
  * @return int 0 on success, negative error code on failure
@@ -373,7 +373,7 @@ int lidar_get_version(device_handle device,lidar_fireware_version_t *version);
 
 /**
  * @brief Set custom algorithm parameters for the device
- *
+ * 
  * Sends custom parameter settings to the device.
  *
  * @param device Handle to the target device
@@ -386,7 +386,7 @@ int lidar_set_custom_parameter(device_handle device, const char* param_name, con
 
 /**
  * @brief Get custom algorithm parameters for the device
- *
+ * 
  * Get custom parameter settings from the device.
  *
  * @param device Handle to the target device
@@ -398,7 +398,7 @@ int lidar_get_custom_parameter(device_handle device, const char* param_name, int
 
 /**
  * @brief Get custom algorithm parameters for the device
- *
+ * 
  * Get custom parameter settings from the device.
  *
  * @param device Handle to the target device
@@ -493,7 +493,7 @@ int lidar_save_map(device_handle device,
 
 /**
  * @brief Set the depth parameters for the device
- *
+ * 
  * This function must be called before starting data stream.
  *
  * @param device Handle to the target device
@@ -505,7 +505,7 @@ int lidar_set_depth_parameter(device_handle device, const lidar_depth_para_t *pa
 /**
  * @brief Enable or disable IMU smooth sending feature
  *
- * When enabled, IMU data will be sent at precise intervals (default 400Hz)
+ * When enabled, IMU data will be sent at precise intervals (default 400Hz) 
  * using a dedicated high-priority thread to reduce jitter and timing variance.
  * When disabled, IMU data will be sent immediately upon reception.
  *
@@ -517,7 +517,7 @@ int lidar_enable_imu_smooth_sending(int enable);
 /**
  * @brief Set IMU smooth sending frequency
  *
- * Set the target frequency for IMU smooth sending. Only effective when
+ * Set the target frequency for IMU smooth sending. Only effective when 
  * smooth sending is enabled via lidar_enable_imu_smooth_sending().
  *
  * @param frequency_hz Target frequency in Hz (1-1000 Hz, recommended 400 Hz)

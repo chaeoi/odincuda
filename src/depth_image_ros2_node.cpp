@@ -42,7 +42,7 @@ void DepthImageRos2Node::initialize()
     color_sub_.subscribe(this, color_raw_topic_);
 
     sync_ = std::make_shared<Sync>(MySyncPolicy(10), cloud_sub_, color_sub_);
-    sync_->registerCallback(std::bind(&DepthImageRos2Node::syncCallback, this,
+    sync_->registerCallback(std::bind(&DepthImageRos2Node::syncCallback, this, 
                                      std::placeholders::_1, std::placeholders::_2));
 
     it_ = std::make_shared<image_transport::ImageTransport>(shared_from_this());
