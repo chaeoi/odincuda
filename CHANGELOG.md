@@ -8,12 +8,12 @@
 3.Fix the issue where the driver's initial configuration could not read the calibration file
 
 0.13.0 20260709
-1.add large file transfer
+1.add large file transfer 
 
 v0.11.0 2026_0618
 Required Minimum Firmware Version：0.12.0
 1.Reduce cloud slam latency
-2.Improve get mapping result
+2.Improve get mapping result 
 
 v0.10.5 2026_0525
 1.modify recorddata format，add device_id、algorithm_version key
