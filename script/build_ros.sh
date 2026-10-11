@@ -89,12 +89,13 @@ build_workspace() {
     
     # Switch to workspace root and build
     cd "${WORKSPACE_ROOT}" || return 1
+    local build_jobs="${ODIN_BUILD_JOBS:-2}"
     catkin_make \
         -DBUILD_SYSTEM=ROS1 \
         -DODIN_BUILD_CUDA=ON \
         -DODIN_CUDA_ARCH=87 \
         -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
-        -j"$(nproc)"
+        -j"${build_jobs}" -l"${build_jobs}"
     BUILD_RESULT=$?
     
     # If build successful, source environment

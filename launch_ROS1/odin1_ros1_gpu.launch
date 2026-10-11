@@ -11,12 +11,12 @@
 
     <node pkg="odin_ros_driver" type="pcd2depth_node_gpu" name="pcd2depth_node_gpu" output="screen">
         <rosparam command="load" file="$(find odin_ros_driver)/config/control_command.yaml"/>
-        <param name="calib_file_path" value="$(find odin_ros_driver)/config/calib.yaml"/>
+        <!-- calib_file_path defaults to ~/.ros/odin_ros_driver/calib.yaml -->
     </node>
 
     <node if="$(arg enable_reprojection)" pkg="odin_ros_driver" type="cloud_reprojection_node" name="cloud_reprojection_node_gpu_stack" output="screen">
         <rosparam command="load" file="$(find odin_ros_driver)/config/control_command.yaml"/>
-        <param name="calib_file_path" value="$(find odin_ros_driver)/config/calib.yaml"/>
+        <!-- calib_file_path defaults to ~/.ros/odin_ros_driver/calib.yaml -->
     </node>
 
     <node if="$(arg enable_overlay)" pkg="odin_ros_driver" type="image_overlay_node" name="image_overlay_node_gpu_stack" output="screen">
