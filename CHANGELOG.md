@@ -1,3 +1,16 @@
+0.14.4 2260910
+1.modify lidar_api_type.h RGB comments
+2.update sdk to fix signal printf backtrace
+
+0.14.3 20260903
+1.Fix crash problem
+
+0.14.2 20260825
+1. Add RGB DTOF filter
+2. Fix USB disconnect deadlock issue
+3. Add RGB parameter configuration
+4. Add save_map, reset_algo, get_device_logs service
+
 0.14.1 20260809
 1. Fixed the SDK's USB memory leak issue
 2. Fixed the problem of 'transfer no mem' caused by USB buffer full during machine transfer

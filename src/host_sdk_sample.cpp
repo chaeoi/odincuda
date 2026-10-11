@@ -51,6 +51,9 @@ limitations under the License.
     #include "odin_ros_driver/srv/get_awb.hpp"
     #include "odin_ros_driver/srv/set_ae.hpp"
     #include "odin_ros_driver/srv/set_awb.hpp"
+    #include "odin_ros_driver/srv/get_device_logs.hpp"
+    #include "odin_ros_driver/srv/save_map.hpp"
+    #include "odin_ros_driver/srv/reset_algo.hpp"
 #else
     #include <ros/package.h>
     #include <ros/ros.h>
@@ -59,8 +62,11 @@ limitations under the License.
     #include "odin_ros_driver/GetAwb.h"
     #include "odin_ros_driver/SetAe.h"
     #include "odin_ros_driver/SetAwb.h"
+    #include "odin_ros_driver/GetDeviceLogs.h"
+    #include "odin_ros_driver/SaveMap.h"
+    #include "odin_ros_driver/ResetAlgo.h"
 #endif
-#define ros_driver_version "0.14.0"
+#define ros_driver_version "0.14.4"
 #define required_firmware_version_major 0
 #define required_firmware_version_minor 13
 #define required_firmware_version_patch 0
@@ -151,6 +157,12 @@ int g_use_host_ros_time = 0;
 int g_save_log = 0;
 int g_cloud_raw_confidence_threshold = 35;
 int g_dtof_fps = 145;  // DTOF sensor frame rate: 100 (10fps) or 145 (14.5fps)
+
+// RGB camera configuration
+int g_rgb_format = 0;     // 0: NV12; 1: MJPEG
+int g_rgb_width = 1600;   // Image width in pixels
+int g_rgb_height = 1296;  // Image height in pixels
+int g_rgb_fps = 100;      // Frame rate * 10 (300 = 30fps)
 
 std::filesystem::path log_root_dir_;
 int g_custom_map_mode = 0;
@@ -604,6 +616,29 @@ static void process_command_file() {
                         }).detach();
                     }
                     return;  // save_map=1 handled, skip the generic set path below
+                }
+
+                // Special handling for "spad_filter": host-side SPAD crosstalk filter
+                // toggle, not a device-side parameter, so call lidar_enable_spad_filter()
+                // directly instead of lidar_set_custom_parameter().
+                if (param_name == "spad_filter") {
+                    int ret = lidar_enable_spad_filter(value);
+                    if (ret == 0) {
+                        #ifdef ROS2
+                            RCLCPP_INFO(rclcpp::get_logger("command_processor"),
+                                       "Successfully set %s = %d", param_name.c_str(), value);
+                        #else
+                            ROS_INFO("Successfully set %s = %d", param_name.c_str(), value);
+                        #endif
+                    } else {
+                        #ifdef ROS2
+                            RCLCPP_ERROR(rclcpp::get_logger("command_processor"),
+                                        "Failed to set %s = %d, error: %d", param_name.c_str(), value, ret);
+                        #else
+                            ROS_ERROR("Failed to set %s = %d, error: %d", param_name.c_str(), value, ret);
+                        #endif
+                    }
+                    return;
                 }
 
                 // Generic path for all other parameters (and save_map=0 / save_map=N>1).
@@ -1725,6 +1760,31 @@ static void lidar_device_callback(const lidar_device_info_t* device, bool attach
             ROS_INFO("DTOF sensor frame rate set to %.1f fps", g_dtof_fps / 10.0);
         #endif
 
+        // Set RGB camera configuration (format, resolution, frame rate)
+        // Must be called before lidar_start_stream() and lidar_activate_stream_type()
+        if (g_sendrgb) {
+            lidar_rgb_para_t rgbPara;
+            rgbPara.format = (lidar_rgb_format_e)g_rgb_format;
+            rgbPara.width  = (uint32_t)g_rgb_width;
+            rgbPara.height = (uint32_t)g_rgb_height;
+            rgbPara.fps    = (uint32_t)g_rgb_fps;
+            int rgb_rc = lidar_set_rgb_parameter(odinDevice, &rgbPara);
+            if (rgb_rc) {
+                #ifdef ROS2
+                    RCLCPP_WARN(rclcpp::get_logger("ros[host_sdk_sample]"),
+                        "set RGB parameter failed (rc=%d): format=%d, %dx%d@%d", rgb_rc, g_rgb_format, g_rgb_width, g_rgb_height, g_rgb_fps);
+                #else
+                    ROS_WARN("set RGB parameter failed (rc=%d): format=%d, %dx%d@%d", rgb_rc, g_rgb_format, g_rgb_width, g_rgb_height, g_rgb_fps);
+                #endif
+            } else {
+                #ifdef ROS2
+                    RCLCPP_INFO(rclcpp::get_logger("ros[host_sdk_sample]"),
+                        "RGB camera configured: format=%d, %dx%d@%.1ffps", g_rgb_format, g_rgb_width, g_rgb_height, g_rgb_fps / 10.0);
+                #else
+                    ROS_INFO("RGB camera configured: format=%d, %dx%d@%.1ffps", g_rgb_format, g_rgb_width, g_rgb_height, g_rgb_fps / 10.0);
+                #endif
+            }
+        }
 
         if (lidar_set_mode(odinDevice, type)) {
             #ifdef ROS2
@@ -1753,26 +1813,10 @@ static void lidar_device_callback(const lidar_device_info_t* device, bool attach
             ROS_INFO("Custom map mode: %d", g_custom_map_mode);
         #endif
 
-        if (g_custom_map_mode == 1) {
-            int save_map_init_value = 0;
-            int result = lidar_set_custom_parameter(odinDevice, "save_map", &save_map_init_value, sizeof(int));
-
-            if (result == 0) {
-                #ifdef ROS2
-                    RCLCPP_INFO(rclcpp::get_logger("command_processor"),
-                            "Successfully initialized %s = %d", "save_map", save_map_init_value);
-                #else
-                    ROS_INFO("Successfully initialized %s = %d", "save_map", save_map_init_value);
-                #endif
-            } else {
-                #ifdef ROS2
-                    RCLCPP_ERROR(rclcpp::get_logger("command_processor"),
-                                "Failed to initialize %s = %d, error: %d", "save_map", save_map_init_value, result);
-                #else
-                    ROS_ERROR("Failed to initialize %s = %d, error: %d", "save_map", save_map_init_value, result);
-                #endif
-            }
-        } else if (g_custom_map_mode == 2) {
+        // save_map=0 initialization is deferred to after lidar_start_stream()
+        // because the device only accepts this parameter when streaming is active.
+        // See the post-stream block below.
+        if (g_custom_map_mode == 2) {
             bool result = false;
             int retryTime = 3;
             if (g_relocalization_map_abs_path != "" && std::filesystem::exists(g_relocalization_map_abs_path)) {
@@ -1956,6 +2000,29 @@ static void lidar_device_callback(const lidar_device_info_t* device, bool attach
             lidar_deactivate_stream_type(odinDevice, LIDAR_DT_SLAM_CLOUD);
         }
 
+        // Initialize save_map=0 after streaming is active, since the device
+        // only accepts this parameter when streaming is active. This clears
+        // any residual save_map=1 from a previous session.
+        if (g_custom_map_mode == 1) {
+            int save_map_init_value = 0;
+            int result = lidar_set_custom_parameter(odinDevice, "save_map", &save_map_init_value, sizeof(int));
+
+            if (result == 0) {
+                #ifdef ROS2
+                    RCLCPP_INFO(rclcpp::get_logger("device_cb"),
+                            "Successfully initialized %s = %d", "save_map", save_map_init_value);
+                #else
+                    ROS_INFO("Successfully initialized %s = %d", "save_map", save_map_init_value);
+                #endif
+            } else {
+                #ifdef ROS2
+                    RCLCPP_ERROR(rclcpp::get_logger("device_cb"),
+                                "Failed to initialize %s = %d, error: %d", "save_map", save_map_init_value, result);
+                #else
+                    ROS_ERROR("Failed to initialize %s = %d, error: %d", "save_map", save_map_init_value, result);
+                #endif
+            }
+        }
         software_connect_timing = false;
         deviceConnected = true;
         deviceDisconnected = false;
@@ -2075,7 +2142,7 @@ int main(int argc, char *argv[])
     //
     // Response rc convention (all 4 services):
     //   0      success                          (success = true)
-    //   400..  device-side error, see lidar_ae_error_e
+    //   400..  device-side error, see lidar_ae_error_e / lidar_rgb_error_e
     //   -100   driver has not opened the device yet
     //   <0     other SDK-side error (USB / timeout / malformed reply)
     //
@@ -2161,9 +2228,92 @@ int main(int argc, char *argv[])
             res->success = (rc == 0);
         });
 
+    auto srv_get_device_logs = node->create_service<odin_ros_driver::srv::GetDeviceLogs>(
+        "/odin1/get_device_logs",
+        [](const std::shared_ptr<odin_ros_driver::srv::GetDeviceLogs::Request>  req,
+                 std::shared_ptr<odin_ros_driver::srv::GetDeviceLogs::Response> res) {
+            if (odinDevice == nullptr) {
+                res->success = false;
+                res->rc = -100;
+                return;
+            }
+            int rc = lidar_get_logs(odinDevice, req->dest_dir.c_str());
+            res->rc      = rc;
+            res->success = (rc == 0);
+        });
+
+    auto srv_save_map = node->create_service<odin_ros_driver::srv::SaveMap>(
+        "/odin1/save_map",
+        [](const std::shared_ptr<odin_ros_driver::srv::SaveMap::Request>  req,
+                 std::shared_ptr<odin_ros_driver::srv::SaveMap::Response> res) {
+            if (odinDevice == nullptr) {
+                res->success = false;
+                res->rc = -100;
+                return;
+            }
+            int value = req->value;
+            if (value == 1) {
+                if (g_map_transfer_in_progress.load()) {
+                    res->rc = -2;
+                    res->success = false;
+                    RCLCPP_WARN(rclcpp::get_logger("service"),
+                                "Map transfer already in progress, ignoring save_map=1 request");
+                    return;
+                }
+                auto now = std::chrono::system_clock::now();
+                std::time_t t = std::chrono::system_clock::to_time_t(now);
+                std::tm tm{};
+                #ifdef _WIN32
+                    localtime_s(&tm, &t);
+                #else
+                    localtime_r(&t, &tm);
+                #endif
+                char map_save_time[32];
+                std::strftime(map_save_time, sizeof(map_save_time), "%Y%m%d_%H%M%S", &tm);
+                std::string map_dir = g_mapping_result_dest_dir != "" ? g_mapping_result_dest_dir : map_root_dir_.string();
+                std::string map_name = g_mapping_result_file_name != "" ? g_mapping_result_file_name : "map_" + std::string(map_save_time) + ".bin";
+                RCLCPP_INFO(rclcpp::get_logger("service"),
+                            "Map save triggered, will transfer to [%s/%s]", map_dir.c_str(), map_name.c_str());
+                g_map_transfer_in_progress.store(true);
+                std::thread([map_dir, map_name]() {
+                    int ret = lidar_save_map(odinDevice, map_dir.c_str(), map_name.c_str(), 0);
+                    g_map_transfer_in_progress.store(false);
+                    if (ret == 0) {
+                        RCLCPP_INFO(rclcpp::get_logger("map_transfer"), "Map transfer completed: %s/%s", map_dir.c_str(), map_name.c_str());
+                    } else if (ret == -2) {
+                        RCLCPP_WARN(rclcpp::get_logger("map_transfer"), "Map transfer skipped: device is busy with another transfer");
+                    } else {
+                        RCLCPP_WARN(rclcpp::get_logger("map_transfer"), "Map transfer failed, error code: %d", ret);
+                    }
+                }).detach();
+                res->rc = 0;
+                res->success = true;
+            } else {
+                int rc = lidar_set_custom_parameter(odinDevice, "save_map", &value, sizeof(int));
+                res->rc = rc;
+                res->success = (rc == 0);
+            }
+        });
+
+    auto srv_reset_algo = node->create_service<odin_ros_driver::srv::ResetAlgo>(
+        "/odin1/reset_algo",
+        [](const std::shared_ptr<odin_ros_driver::srv::ResetAlgo::Request>  req,
+                 std::shared_ptr<odin_ros_driver::srv::ResetAlgo::Response> res) {
+            if (odinDevice == nullptr) {
+                res->success = false;
+                res->rc = -100;
+                return;
+            }
+            int value = req->value;
+            int rc = lidar_set_custom_parameter(odinDevice, "algo_reset", &value, sizeof(int));
+            res->rc = rc;
+            res->success = (rc == 0);
+        });
+
     RCLCPP_INFO(node->get_logger(),
-        "AE/AWB debug services ready: "
-        "/odin1/get_ae /odin1/get_awb /odin1/set_ae /odin1/set_awb");
+        "Services ready: "
+        "/odin1/get_ae /odin1/get_awb /odin1/set_ae /odin1/set_awb; "
+        "/odin1/get_device_logs /odin1/save_map /odin1/reset_algo");
 #else
     ros::init(argc, argv, "lydros_node");
     ros::NodeHandle nh;
@@ -2273,8 +2423,104 @@ int main(int argc, char *argv[])
                 return true;
             }));
 
-    ROS_INFO("AE/AWB debug services ready: "
-             "/odin1/get_ae /odin1/get_awb /odin1/set_ae /odin1/set_awb");
+    ros::ServiceServer srv_get_device_logs = nh.advertiseService<
+        odin_ros_driver::GetDeviceLogs::Request,
+        odin_ros_driver::GetDeviceLogs::Response>(
+        "/odin1/get_device_logs",
+        boost::function<bool(odin_ros_driver::GetDeviceLogs::Request&,
+                             odin_ros_driver::GetDeviceLogs::Response&)>(
+            [](odin_ros_driver::GetDeviceLogs::Request  &req,
+               odin_ros_driver::GetDeviceLogs::Response &res) -> bool {
+                if (odinDevice == nullptr) {
+                    res.success = false;
+                    res.rc = -100;
+                    return true;
+                }
+                int rc = lidar_get_logs(odinDevice, req.dest_dir.c_str());
+                res.rc      = rc;
+                res.success = (rc == 0);
+                return true;
+            }));
+
+    ros::ServiceServer srv_save_map = nh.advertiseService<
+        odin_ros_driver::SaveMap::Request,
+        odin_ros_driver::SaveMap::Response>(
+        "/odin1/save_map",
+        boost::function<bool(odin_ros_driver::SaveMap::Request&,
+                             odin_ros_driver::SaveMap::Response&)>(
+            [](odin_ros_driver::SaveMap::Request  &req,
+               odin_ros_driver::SaveMap::Response &res) -> bool {
+                if (odinDevice == nullptr) {
+                    res.success = false;
+                    res.rc = -100;
+                    return true;
+                }
+                int value = req.value;
+                if (value == 1) {
+                    if (g_map_transfer_in_progress.load()) {
+                        res.rc = -2;
+                        res.success = false;
+                        ROS_WARN("Map transfer already in progress, ignoring save_map=1 request");
+                        return true;
+                    }
+                    auto now = std::chrono::system_clock::now();
+                    std::time_t t = std::chrono::system_clock::to_time_t(now);
+                    std::tm tm{};
+                    #ifdef _WIN32
+                        localtime_s(&tm, &t);
+                    #else
+                        localtime_r(&t, &tm);
+                    #endif
+                    char map_save_time[32];
+                    std::strftime(map_save_time, sizeof(map_save_time), "%Y%m%d_%H%M%S", &tm);
+                    std::string map_dir = g_mapping_result_dest_dir != "" ? g_mapping_result_dest_dir : map_root_dir_.string();
+                    std::string map_name = g_mapping_result_file_name != "" ? g_mapping_result_file_name : "map_" + std::string(map_save_time) + ".bin";
+                    ROS_INFO("Map save triggered, will transfer to [%s/%s]", map_dir.c_str(), map_name.c_str());
+                    g_map_transfer_in_progress.store(true);
+                    std::thread([map_dir, map_name]() {
+                        int ret = lidar_save_map(odinDevice, map_dir.c_str(), map_name.c_str(), 0);
+                        g_map_transfer_in_progress.store(false);
+                        if (ret == 0) {
+                            ROS_INFO("Map transfer completed: %s/%s", map_dir.c_str(), map_name.c_str());
+                        } else if (ret == -2) {
+                            ROS_WARN("Map transfer skipped: device is busy with another transfer");
+                        } else {
+                            ROS_WARN("Map transfer failed, error code: %d", ret);
+                        }
+                    }).detach();
+                    res.rc = 0;
+                    res.success = true;
+                } else {
+                    int rc = lidar_set_custom_parameter(odinDevice, "save_map", &value, sizeof(int));
+                    res.rc = rc;
+                    res.success = (rc == 0);
+                }
+                return true;
+            }));
+
+    ros::ServiceServer srv_reset_algo = nh.advertiseService<
+        odin_ros_driver::ResetAlgo::Request,
+        odin_ros_driver::ResetAlgo::Response>(
+        "/odin1/reset_algo",
+        boost::function<bool(odin_ros_driver::ResetAlgo::Request&,
+                             odin_ros_driver::ResetAlgo::Response&)>(
+            [](odin_ros_driver::ResetAlgo::Request  &req,
+               odin_ros_driver::ResetAlgo::Response &res) -> bool {
+                if (odinDevice == nullptr) {
+                    res.success = false;
+                    res.rc = -100;
+                    return true;
+                }
+                int value = req.value;
+                int rc = lidar_set_custom_parameter(odinDevice, "algo_reset", &value, sizeof(int));
+                res.rc = rc;
+                res.success = (rc == 0);
+                return true;
+            }));
+
+    ROS_INFO("Services ready: "
+             "/odin1/get_ae /odin1/get_awb /odin1/set_ae /odin1/set_awb; "
+             "/odin1/get_device_logs /odin1/save_map /odin1/reset_algo");
 #endif
 
     // Register signal handlers for Ctrl+C
@@ -2329,6 +2575,10 @@ int main(int argc, char *argv[])
         g_cloud_raw_confidence_threshold = get_key_value("cloud_raw_confidence_threshold", 35);
         g_rosNodeControlImpl.setCloudRawConfidenceThreshold(g_cloud_raw_confidence_threshold);
         g_dtof_fps      = get_key_value("dtof_fps", 145);  // Read DTOF frame rate from config (100=10fps, 145=14.5fps)
+        g_rgb_format    = get_key_value("rgb_format", 0);    // 0: NV12; 1: MJPEG
+        g_rgb_width     = get_key_value("rgb_width", 1536);
+        g_rgb_height    = get_key_value("rgb_height", 1280);
+        g_rgb_fps       = get_key_value("rgb_fps", 300);      // 300 = 30fps
         g_sendodom      = get_key_value("sendodom", 1);
         g_send_odom_baselink_tf = get_key_value("send_odom_baselink_tf", 0);
         g_tf_extra_publish_rate = get_key_value("tf_extra_publish_rate", 0);
@@ -2456,6 +2706,11 @@ int main(int argc, char *argv[])
             return -1;
         }
 
+        // Re-arm SIGINT/SIGTERM handlers: lidar_system_init() installs the
+        // SDK's internal crash handler which overrides our handlers above and
+        // prints a backtrace on Ctrl+C / kill, confusing users.
+        signal(SIGINT, signal_handler);
+        signal(SIGTERM, signal_handler);
         // Configure SDK IMU smooth sending AFTER lidar_system_init
         // SDK now defaults to disabled, only enable if configured
         if (g_enable_imu_smooth) {
