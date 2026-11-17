@@ -1,0 +1,3 @@
+#pragma once
+
+#define ODINCUDA_VERSION "@ODINCUDA_VERSION@"

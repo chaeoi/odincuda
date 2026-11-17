@@ -3,3 +3,5 @@
 /maprecorddata/
 /log/
 /.odin-managed-install
+
+__pycache__/

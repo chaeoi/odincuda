@@ -39,7 +39,17 @@ curl -fsSL https://gitwarp.canghai.org/raw.githubusercontent.com/chaeoi/odincuda
 Git 工作区存在未提交修改时会停止。安装完成后重新登录并物理拔插相机，使 `plugdev`
 权限生效。完整检查项、手动安装和故障处理见 [DEPLOYMENT.md](DEPLOYMENT.md)。
 
+## 定制版本与源码发布
+
+推送到 `main` 或手动运行发布流程时，按提交者时间的 UTC 年月及当月最大已分配序号加一生成 `年.月.序号`，例如 `2026.11.1`。同一提交重跑复用编号，失败预留号不回收；只有最大正式版本会成为 latest。
+
+[最新正式版本](https://github.com/chaeoi/odincuda/releases/latest) 提供 `odincuda_<版本>_source.zip` 和 `SHA256SUMS`。源码包的 `VERSION`、ROS 1/ROS 2 包清单均写入发布号，编译后的 `host_sdk_sample --version` 返回同一版本。仍需在对应 ROS/Jetson 环境编译，源码发布流程不生成预编译 CUDA 二进制。
+
+普通开发源码使用 `0.0.0-dev`，ROS 清单使用数值占位 `0.0.0`；从版本标签检出或传入 `-DODINCUDA_VERSION=2026.11.1` 时，CMake 会生成相应的程序版本和安装清单。日志单独保留官方驱动版本，便于追溯上游来源。
+
 ## 与官方驱动的关系
+
+官方代码保存在 `upstream` 远端跟踪分支，定制代码和发布流程保存在 `main`，不再通过额外的本地镜像分支合并。以后需要同步官方时，在 `main` 执行 `git fetch upstream` 和 `git merge upstream/main`；发布流程不会自动执行上游同步。官方分支、官方版本和官方标签独立保留。
 
 本仓库直接沿用官方驱动的目录结构、文件名、类名、变量名、节点名和话题名，CUDA
 功能在原有实现中按编译选项接入。这样后续可继续对照

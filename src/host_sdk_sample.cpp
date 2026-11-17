@@ -15,6 +15,7 @@ limitations under the License.
 #include "yaml_parser.h"
 #include "rawCloudRender.h"
 #include "odin_calib_path.h"
+#include "odincuda_version.hpp"
 #include <filesystem>
 #include <thread>
 #include <string>
@@ -1479,7 +1480,7 @@ static void lidar_device_callback(const lidar_device_info_t* device, bool attach
         }
         else {
             #ifdef ROS2
-                RCLCPP_INFO(rclcpp::get_logger(__func__), "ros_driver_version:%s, recommended_firmware_version:%d.%d.%d", ros_driver_version, required_firmware_version_major, required_firmware_version_minor, required_firmware_version_patch);
+                RCLCPP_INFO(rclcpp::get_logger(__func__), "odincuda_version:%s, upstream_ros_driver_version:%s, recommended_firmware_version:%d.%d.%d", ODINCUDA_VERSION, ros_driver_version, required_firmware_version_major, required_firmware_version_minor, required_firmware_version_patch);
                 RCLCPP_INFO(rclcpp::get_logger(__func__), "get version success.");
                 RCLCPP_INFO(rclcpp::get_logger(__func__), "kernel_version: V%d.%d.%d",version.kernel_version.major,version.kernel_version.minor,version.kernel_version.patch);
                 RCLCPP_INFO(rclcpp::get_logger(__func__), "mcu_version: V%d.%d.%d",version.mcu_version.major,version.mcu_version.minor,version.mcu_version.patch);
@@ -1487,7 +1488,7 @@ static void lidar_device_callback(const lidar_device_info_t* device, bool attach
                 RCLCPP_INFO(rclcpp::get_logger(__func__), "Daemon_proc_version: V%d.%d.%d",version.Daemon_proc_version.major,version.Daemon_proc_version.minor,version.Daemon_proc_version.patch);
                 RCLCPP_INFO(rclcpp::get_logger(__func__), "slam_version: V%d.%d.%d",version.slam_version.major,version.slam_version.minor,version.slam_version.patch);
             #else
-                ROS_INFO("ros_driver_version:%s, recommended_min_firmware_version:%d.%d.%d", ros_driver_version, required_firmware_version_major, required_firmware_version_minor, required_firmware_version_patch);
+                ROS_INFO("odincuda_version:%s, upstream_ros_driver_version:%s, recommended_min_firmware_version:%d.%d.%d", ODINCUDA_VERSION, ros_driver_version, required_firmware_version_major, required_firmware_version_minor, required_firmware_version_patch);
                 ROS_INFO("get version success.");
                 ROS_INFO("kernel_version: V%d.%d.%d",version.kernel_version.major,version.kernel_version.minor,version.kernel_version.patch);
                 ROS_INFO("mcu_version: V%d.%d.%d",version.mcu_version.major,version.mcu_version.minor,version.mcu_version.patch);
@@ -2112,6 +2113,10 @@ static void lidar_device_callback(const lidar_device_info_t* device, bool attach
 
 int main(int argc, char *argv[])
 {
+    if (argc == 2 && std::strcmp(argv[1], "--version") == 0) {
+        std::puts(ODINCUDA_VERSION);
+        return 0;
+    }
 #ifdef ROS2
     rclcpp::init(argc, argv);
     auto node = std::make_shared<rclcpp::Node>("lydros_node");

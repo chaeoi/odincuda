@@ -1,5 +1,6 @@
 cmake_minimum_required(VERSION 3.5)
-project(odin_ros_driver)
+include(cmake/Version.cmake)
+project(odin_ros_driver VERSION "${ODINCUDA_PACKAGE_VERSION}")
 
 
 if(DEFINED BUILD_SYSTEM)
@@ -184,6 +185,7 @@ if(ROS_VERSION STREQUAL "ROS1")
         image_transport
         message_generation
     )
+    catkin_package_xml(DIRECTORY "${ODINCUDA_GENERATED_DIR}")
 
     # ---- AE/AWB debug services ----
     # Declare custom .srv files; catkin generates ros1 message headers for them.
@@ -320,6 +322,7 @@ elseif(ROS_VERSION STREQUAL "ROS2")
     
     # Find all necessary ROS2 packages
     find_package(ament_cmake REQUIRED)
+    ament_package_xml(DIRECTORY "${ODINCUDA_GENERATED_DIR}")
     find_package(rclcpp REQUIRED)
     find_package(std_msgs REQUIRED)
     find_package(sensor_msgs REQUIRED)
@@ -567,6 +570,10 @@ elseif(ROS_VERSION STREQUAL "ROS2")
 else()
     message(FATAL_ERROR "Invalid ROS_VERSION: ${ROS_VERSION}")
 endif()
+
+target_include_directories(host_sdk_sample PRIVATE "${ODINCUDA_GENERATED_DIR}")
+install(FILES "${ODINCUDA_GENERATED_DIR}/package.xml"
+    DESTINATION share/${PROJECT_NAME})
 
 # ARM platform specific link options
 if(TARGET_PLATFORM STREQUAL "arm")
